@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ANL の出力手順（midas iGen） — MGT2Excel</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏗️</text></svg>">
+<style>
+  :root {
+    --ink: #1a2433; --sub: #5a6b80; --line: #d8dfe8;
+    --blue: #2563c4; --blue-bg: #eaf1fb;
+    --green: #2c7a4b; --green-bg: #eaf5ee;
+    --amber-bg: #fdf6e3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 16px 80px;
+    font-family: "Yu Gothic UI", "Meiryo", "Hiragino Kaku Gothic ProN", sans-serif;
+    color: var(--ink); background: #fafbfc; line-height: 1.9;
+  }
+  main { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 26px; border-bottom: 3px solid var(--blue); padding: 24px 0 10px; }
+  h1 small { display: block; font-size: 13px; color: var(--sub); font-weight: normal; margin-top: 6px; }
+  nav.top { font-size: 14px; margin-top: 14px; }
+  nav.top a { color: var(--blue); text-decoration: none; margin-right: 18px; }
+  .step {
+    background: #fff; border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 22px; margin: 18px 0;
+  }
+  .step h3 { margin: 0 0 8px; font-size: 17px; }
+  .step h3 .num {
+    display: inline-block; background: var(--blue); color: #fff; border-radius: 50%;
+    width: 30px; height: 30px; text-align: center; line-height: 30px;
+    margin-right: 10px; font-size: 16px;
+  }
+  .step img {
+    max-width: 100%; border: 1px solid var(--line); border-radius: 8px;
+    margin-top: 10px; box-shadow: 0 2px 8px rgba(20,40,70,0.08);
+  }
+  .step p { margin: 8px 0; font-size: 14.5px; }
+  .note { background: var(--amber-bg); border-left: 5px solid #d9a520; border-radius: 3px; padding: 10px 14px; margin: 16px 0; font-size: 14px; }
+  .good { background: var(--green-bg); border-left: 5px solid var(--green); border-radius: 3px; padding: 10px 14px; margin: 16px 0; font-size: 14px; }
+  code { background: #eef1f5; border-radius: 4px; padding: 1px 6px; font-family: Consolas, monospace; font-size: 0.92em; }
+  b.red { color: #c2483d; }
+  footer { margin-top: 64px; font-size: 12px; color: var(--sub); border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>ANL（解析結果テキスト）の出力手順
+<small>midas iGen から MGT2Excel 用の解析結果ファイルを出力する方法</small>
+</h1>
+
+<nav class="top">
+  <a href="index.html">← ツールを開く</a>
+  <a href="manual.html">使い方</a>
+  <a href="logic.html">判定ロジック</a>
+</nav>
+
+<div class="good">
+出力した <b>.anl</b> は、モデルの <b>.mgt</b>（ファイル → エクスポート → midas iGen MGT ファイル）と
+一緒に <a href="index.html">MGT2Excel</a> にドラッグ＆ドロップして使います。
+解析を実行済みのモデルで操作してください。
+</div>
+
+<div class="step">
+<h3><span class="num">1</span>結果タブ →「テキスト出力」をクリック</h3>
+<p>リボンの<b>「結果」タブ</b>右側にある<b class="red">「テキスト出力」</b>ボタンを押すと、
+テキスト印刷ウィザードが開きます。</p>
+<img src="img/anl_step1.png" alt="結果タブのテキスト出力ボタン">
+</div>
+
+<div class="step">
+<h3><span class="num">2</span>「新規荷重セット追加」をクリック</h3>
+<p>最初の画面で<b class="red">「新規荷重セット追加」</b>を押します
+（荷重セット＝どの荷重ケース/組合せを出力するかの指定です）。</p>
+<img src="img/anl_step2.png" alt="テキスト印刷ウィザードの新規荷重セット追加">
+</div>
+
+<div class="step">
+<h3><span class="num">3</span>出力したい荷重組合わせに ☑ → OK</h3>
+<p>断面算定に使う<b class="red">荷重組合わせ（例: ΣDL・ΣDL+EX・ΣDL+EY）にチェック</b>を
+入れて OK。チェックした組合せが Excel の LC 列に並びます。</p>
+<img src="img/anl_step3.png" alt="荷重ケース/荷重組合わせの選択">
+</div>
+
+<div class="step">
+<h3><span class="num">4</span>「次へ」→ 断面力/応力度の出力設定で「トラス」「梁要素」に ☑</h3>
+<p>要素タイプで<b class="red">「トラス」と「梁要素」の両方にチェック</b>します。
+トラス（ブレース等）を忘れると、Excel でブレースの軸力が空欄になります。</p>
+<img src="img/anl_step4.png" alt="断面力/応力度の出力設定">
+</div>
+
+<div class="step">
+<h3><span class="num">5</span>（確認）要素選択詳細で「断面力」が入っていること</h3>
+<p>チェック横の「…」ボタンで詳細を開くと、対象要素と出力項目を確認できます。
+<b class="red">「断面力」にチェック</b>が入っていれば OK です（応力度は任意。
+MGT2Excel は断面力を使います）。</p>
+<img src="img/anl_step5.png" alt="要素選択詳細で断面力を確認">
+</div>
+
+<div class="step">
+<h3><span class="num">6</span>「次へ」→ 出力内容とファイル名を確認 →「完了」</h3>
+<p>結果出力リストに「梁 断面力」「トラス要素 断面力」が並んでいることを確認し、
+出力オプションは <b>ASCII</b> のまま、<b class="red">ファイル名（〜.anl）</b>を確認して
+<b class="red">「完了」</b>を押します。保存先はモデルと同じフォルダが分かりやすいです。</p>
+<img src="img/anl_step6.png" alt="結果出力リストと完了ボタン">
+</div>
+
+<div class="step">
+<h3><span class="num">7</span>出力完了 — テキストエディタが開けば成功</h3>
+<p>メッセージウィンドウに「〜の出力 処理中…」と流れたあと、MIDAS/Text Editor で
+<code>&lt;モデル名&gt;.anl</code> が開きます。これで ANL の完成です。
+エディタは閉じて構いません。</p>
+<img src="img/anl_step7.png" alt="ANL がテキストエディタで開いた状態">
+</div>
+
+<div class="note">
+<b>ヒント:</b>
+分布荷重が大きい梁の中央曲げも拾いたい場合は、iGen 側で部材中間の出力位置
+（1/4・中央 CNT・3/4 点）を有効にして出力すると、MGT2Excel の max/min に自動で含まれます。
+また、断面力の分解能を上げたい場合は iGen の単位系を kN にしてから出力してください。
+</div>
+
+<footer>
+MGT2Excel ／ <a href="index.html">ツールを開く</a> ／
+<a href="manual.html">使い方</a> ／
+<a href="logic.html">部材統合の判定ロジック</a>
+</footer>
+
+</main>
+</body>
+</html>
