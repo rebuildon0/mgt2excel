@@ -93,11 +93,49 @@
 </div>
 
 <div class="step">
-<h3><span class="num">5</span>（確認）要素選択詳細で「断面力」が入っていること</h3>
-<p>チェック横の「…」ボタンで詳細を開くと、対象要素と出力項目を確認できます。
-<b class="red">「断面力」にチェック</b>が入っていれば OK です（応力度は任意。
-MGT2Excel は断面力を使います）。</p>
-<img src="img/anl_step5.png" alt="要素選択詳細で断面力を確認">
+<h3><span class="num">5</span>要素選択詳細 — <b class="red">Beam タブで出力位置を「5pt」にする（最重要）</b></h3>
+<p>「梁要素」の横の「…」ボタンで<b>要素選択詳細</b>を開き、
+<b class="red">「Beam」タブ</b>に切り替えて、断面力の<b class="red">出力位置を「5pt」</b>
+（1部材につき I・1/4・中央・3/4・J の5か所）に設定します。
+あわせて「断面力」にチェックが入っていることを確認してください（応力度は任意）。</p>
+<div class="note" style="margin:10px 0">
+⚠️ <b>5pt にしないと中間点の断面力が出力されません。</b>
+分布荷重を受ける梁は中央の曲げが端部より大きくなるため、端部（I/J）だけの出力では
+Excel の max/min が実際より小さく出て<b>危険側の評価</b>になり得ます。必ず 5pt にしてください。
+</div>
+<img src="img/anl_step5.png" alt="要素選択詳細ダイアログ（Trussタブの例）">
+<figure style="margin:12px 0 0; text-align:center">
+<svg viewBox="0 0 520 210" xmlns="http://www.w3.org/2000/svg" font-family="Meiryo,sans-serif"
+     style="max-width:100%; border:1px solid #d8dfe8; border-radius:8px; background:#fff">
+  <rect x="0" y="0" width="520" height="26" fill="#f0f4f9"/>
+  <text x="12" y="18" font-size="12" fill="#1a2433">要素選択詳細（Beam タブのイメージ）</text>
+  <rect x="12" y="36" width="52" height="22" fill="#eef1f5" stroke="#b6c4d4"/>
+  <text x="38" y="51" font-size="12" text-anchor="middle" fill="#5a6b80">Truss</text>
+  <rect x="64" y="34" width="52" height="24" fill="#fff" stroke="#dc2828" stroke-width="2.5"/>
+  <text x="90" y="51" font-size="12" text-anchor="middle" fill="#1a2433" font-weight="bold">Beam</text>
+  <text x="24" y="88" font-size="12.5" fill="#1a2433">断面力の出力位置:</text>
+  <circle cx="160" cy="84" r="6" fill="#fff" stroke="#8899aa"/>
+  <text x="172" y="89" font-size="12.5" fill="#5a6b80">2pt</text>
+  <circle cx="220" cy="84" r="6" fill="#fff" stroke="#8899aa"/>
+  <text x="232" y="89" font-size="12.5" fill="#5a6b80">3pt</text>
+  <circle cx="280" cy="84" r="6" fill="#fff" stroke="#2563c4" stroke-width="2"/>
+  <circle cx="280" cy="84" r="3" fill="#2563c4"/>
+  <text x="292" y="89" font-size="13" fill="#1a2433" font-weight="bold">5pt ← これを選ぶ</text>
+  <rect x="266" y="70" width="160" height="28" fill="none" stroke="#dc2828" stroke-width="2.5" rx="4"/>
+  <line x1="60" y1="130" x2="460" y2="130" stroke="#8899aa" stroke-width="4"/>
+  <g fill="#2563c4">
+    <circle cx="60" cy="130" r="5"/><circle cx="160" cy="130" r="5"/>
+    <circle cx="260" cy="130" r="5"/><circle cx="360" cy="130" r="5"/><circle cx="460" cy="130" r="5"/>
+  </g>
+  <g font-size="11" fill="#5a6b80" text-anchor="middle">
+    <text x="60" y="152">I 端</text><text x="160" y="152">1/4</text>
+    <text x="260" y="152">中央(CNT)</text><text x="360" y="152">3/4</text><text x="460" y="152">J 端</text>
+  </g>
+  <text x="260" y="185" font-size="12" fill="#2c7a4b" text-anchor="middle">1要素につき5か所の断面力が出力される → 中央曲げも Excel の max/min に入る</text>
+</svg>
+<figcaption style="font-size:12px; color:#5a6b80; margin-top:4px">
+5pt 設定のイメージ図（実際の画面とレイアウトは多少異なります）</figcaption>
+</figure>
 </div>
 
 <div class="step">
@@ -118,9 +156,9 @@ MGT2Excel は断面力を使います）。</p>
 
 <div class="note">
 <b>ヒント:</b>
-分布荷重が大きい梁の中央曲げも拾いたい場合は、iGen 側で部材中間の出力位置
-（1/4・中央 CNT・3/4 点）を有効にして出力すると、MGT2Excel の max/min に自動で含まれます。
-また、断面力の分解能を上げたい場合は iGen の単位系を kN にしてから出力してください。
+Step 5 で 5pt にした中間点（1/4・中央 CNT・3/4）の断面力は、MGT2Excel の max/min に
+自動で含まれます。また、断面力の分解能を上げたい場合は iGen の単位系を kN に
+してから出力してください。
 </div>
 
 <footer>
