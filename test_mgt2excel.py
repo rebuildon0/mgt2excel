@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from mgt2excel import (FORCE_TO_KN, LEN_TO_MM, _expand_list, _pt_order,
-                       merge_members, parse_anl, parse_mgt)
+                       merge_members, parse_anl, parse_mgt, section_props)
 
 
 def _make_model(elements, releases=None, supports=None):
@@ -222,6 +222,40 @@ class TestParseAnlMidpoint(unittest.TestCase):
         pts = ["J", "CNT", "I", "3/4", "1/4"]
         self.assertEqual(sorted(pts, key=_pt_order),
                          ["I", "1/4", "CNT", "3/4", "J"])
+
+
+class TestSectionProps(unittest.TestCase):
+    """断面性能の板要素計算(cm系)。圧延材はフィレット無視のためJIS規格値よりやや小さい"""
+
+    def test_round_bar(self):
+        p = section_props(dict(shape="SR", fields=["2", "20"]))
+        self.assertAlmostEqual(p["A"], 3.14, places=2)
+        self.assertAlmostEqual(p["iy"], 0.5, places=3)
+        self.assertAlmostEqual(p["Zy"], 0.785, places=2)
+
+    def test_round_bar_db_name(self):
+        p = section_props(dict(shape="SR", fields=["1", "JIS", "SR 16"]))
+        self.assertAlmostEqual(p["A"], 2.01, places=2)
+
+    def test_h_section(self):
+        # H-200x100x5.5x8: 板要素計算 A=26.12cm², Iy≈1761cm⁴ (JIS: 26.67 / 1840)
+        p = section_props(dict(shape="H",
+                               fields=["2", "200", "100", "5.5", "8",
+                                       "100", "8", "0", "0"]))
+        self.assertAlmostEqual(p["A"], 26.12, places=2)
+        self.assertAlmostEqual(p["Iy"], 1760.9, delta=1.0)
+        self.assertAlmostEqual(p["Zy"], 176.1, delta=0.5)
+        self.assertTrue(p["iz"] < p["iy"])
+        self.assertAlmostEqual(p["imin"], p["iz"], places=6)  # 対称断面
+
+    def test_angle(self):
+        # L-50x50x4: A=3.84cm² (JIS: 3.89)。最小回転半径は主軸まわり
+        p = section_props(dict(shape="L", fields=["1", "JIS", "L 50x4"]))
+        self.assertAlmostEqual(p["A"], 3.84, places=2)
+        self.assertTrue(p["imin"] < p["iy"])  # 山形は主軸(v軸)が最小
+
+    def test_unsupported_shape(self):
+        self.assertIsNone(section_props(dict(shape="T", fields=["2", "100"])))
 
 
 if __name__ == "__main__":

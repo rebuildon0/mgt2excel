@@ -146,6 +146,7 @@ def parse_mgt(path, log=_print):
             continue  # 継続行(2行目以降)は無視
         sections[int(f[0])] = dict(id=int(f[0]), type=f[1], name=f[2],
                                    shape=f[12] if len(f) > 12 else "",
+                                   fields=f[13:] if len(f) > 13 else [],
                                    data=", ".join(f[13:]) if len(f) > 13 else "")
 
     # FRAME-RLS: 梁端解放。2行1組 (I端フラグ行 + J端フラグ行)、フラグは Fx..Mz の6桁。
@@ -287,6 +288,131 @@ def parse_anl(path, log=_print, progress=None):
         len(beam_forces), len(truss_forces), ", ".join(lcs)))
     return dict(beam_forces=beam_forces, truss_forces=truss_forces, lcs=lcs,
                 unit_force=unit_force, unit_len=unit_len)
+
+
+# ---------------------------------------------------------------- 断面性能
+def _plate_props(plates):
+    """板要素の集合から断面性能を求める。
+
+    plates: [(w, h, yc, zc)] 幅w(水平)×高さh(鉛直)の矩形と、その中心座標。
+    戻り値: A, Iy(水平軸まわり), Iz(鉛直軸まわり), Iyz, 縁距離(cy, cz)
+    """
+    A = sum(w * h for w, h, _, _ in plates)
+    ybar = sum(w * h * yc for w, h, yc, _ in plates) / A
+    zbar = sum(w * h * zc for w, h, _, zc in plates) / A
+    Iy = sum(w * h ** 3 / 12.0 + w * h * (zc - zbar) ** 2 for w, h, _, zc in plates)
+    Iz = sum(h * w ** 3 / 12.0 + w * h * (yc - ybar) ** 2 for w, h, yc, _ in plates)
+    Iyz = sum(w * h * (yc - ybar) * (zc - zbar) for w, h, yc, zc in plates)
+    cz = max(max(zc + h / 2.0 for _, h, _, zc in plates) - zbar,
+             zbar - min(zc - h / 2.0 for _, h, _, zc in plates))
+    cy = max(max(yc + w / 2.0 for w, _, yc, _ in plates) - ybar,
+             ybar - min(yc - w / 2.0 for w, _, yc, _ in plates))
+    return A, Iy, Iz, Iyz, cy, cz
+
+
+def _sec_nums(name):
+    return [float(x) for x in re.findall(r"\d+(?:\.\d+)?", name)]
+
+
+def section_props(sec):
+    """断面性能を寸法から板要素として計算する(cm系)。
+
+    戻り値: dict(A, Iy, Iz, Zy, Zz, iy, iz, imin) / 未対応形状・寸法不明は None。
+    Iy/Zy は強軸(局所y軸まわり=My に対応)、Iz/Zz は弱軸。
+    フィレット・R を無視するため、圧延材の規格値より数%小さい(安全側)。
+    """
+    try:
+        shape = (sec.get("shape") or "").strip().upper()
+        f = sec.get("fields") or []
+        if not f:
+            return None
+        mode = f[0].strip()
+        if mode == "2":  # 寸法直接入力
+            vals = []
+            for x in f[1:]:
+                try:
+                    vals.append(float(x))
+                except ValueError:
+                    vals.append(0.0)
+        elif mode == "1":  # DB参照 -> 呼称から寸法を読む
+            vals = _sec_nums(f[2]) if len(f) > 2 else []
+        else:
+            return None
+        if not vals:
+            return None
+
+        if shape == "SR":  # 丸鋼
+            d = vals[0]
+            if d <= 0:
+                return None
+            A = math.pi * d ** 2 / 4.0
+            I = math.pi * d ** 4 / 64.0
+            Z = math.pi * d ** 3 / 32.0
+            i = d / 4.0
+            return dict(A=A / 100, Iy=I / 1e4, Iz=I / 1e4, Zy=Z / 1e3,
+                        Zz=Z / 1e3, iy=i / 10, iz=i / 10, imin=i / 10)
+
+        if shape == "H":
+            H, B, tw, tf = vals[0], vals[1], vals[2], vals[3]
+            if mode == "2" and len(vals) > 5 and vals[4] > 0 and vals[5] > 0:
+                B2, tf2 = vals[4], vals[5]
+            else:
+                B2, tf2 = B, tf
+            plates = [(B, tf, 0.0, H - tf / 2.0),
+                      (B2, tf2, 0.0, tf2 / 2.0),
+                      (tw, H - tf - tf2, 0.0, tf2 + (H - tf - tf2) / 2.0)]
+        elif shape == "L":  # 山形鋼
+            if len(vals) == 2:
+                H = B = vals[0]
+                t = vals[1]
+            else:
+                H, B, t = vals[0], vals[1], vals[2]
+            plates = [(t, H, t / 2.0, H / 2.0),
+                      (B - t, t, t + (B - t) / 2.0, t / 2.0)]
+        elif shape == "C":  # 溝形鋼
+            H, B, tw, tf = vals[0], vals[1], vals[2], vals[3]
+            plates = [(tw, H, tw / 2.0, H / 2.0),
+                      (B - tw, tf, tw + (B - tw) / 2.0, H - tf / 2.0),
+                      (B - tw, tf, tw + (B - tw) / 2.0, tf / 2.0)]
+        elif shape == "CC":  # リップ溝形鋼 (H, B, t, r, リップ)
+            H, B, t = vals[0], vals[1], vals[2]
+            lip = vals[4] if len(vals) > 4 else 0.0
+            plates = [(t, H, t / 2.0, H / 2.0),
+                      (B - t, t, t + (B - t) / 2.0, H - t / 2.0),
+                      (B - t, t, t + (B - t) / 2.0, t / 2.0)]
+            if lip > t:
+                plates += [(t, lip - t, B - t / 2.0, H - t - (lip - t) / 2.0),
+                           (t, lip - t, B - t / 2.0, t + (lip - t) / 2.0)]
+        elif shape == "P":  # 円形鋼管 (D, t)
+            D, t = vals[0], vals[1]
+            d = D - 2 * t
+            A = math.pi * (D ** 2 - d ** 2) / 4.0
+            I = math.pi * (D ** 4 - d ** 4) / 64.0
+            Z = I / (D / 2.0)
+            i = math.sqrt(I / A)
+            return dict(A=A / 100, Iy=I / 1e4, Iz=I / 1e4, Zy=Z / 1e3,
+                        Zz=Z / 1e3, iy=i / 10, iz=i / 10, imin=i / 10)
+        elif shape == "B":  # 角形鋼管 (H, B, tw, tf)
+            H, B, tw, tf = vals[0], vals[1], vals[2], vals[3]
+            plates = [(B, tf, 0.0, H - tf / 2.0), (B, tf, 0.0, tf / 2.0),
+                      (tw, H - 2 * tf, -(B - tw) / 2.0, H / 2.0),
+                      (tw, H - 2 * tf, (B - tw) / 2.0, H / 2.0)]
+        else:
+            return None
+
+        if any(w <= 0 or h <= 0 for w, h, _, _ in plates):
+            return None
+        A, Iy, Iz, Iyz, cy, cz = _plate_props(plates)
+        if A <= 0 or cy <= 0 or cz <= 0:
+            return None
+        Imin = (Iy + Iz) / 2.0 - math.sqrt(((Iy - Iz) / 2.0) ** 2 + Iyz ** 2)
+        Imin = max(Imin, 1e-9)
+        return dict(A=A / 100, Iy=Iy / 1e4, Iz=Iz / 1e4,
+                    Zy=Iy / cz / 1e3, Zz=Iz / cy / 1e3,
+                    iy=math.sqrt(Iy / A) / 10, iz=math.sqrt(Iz / A) / 10,
+                    imin=math.sqrt(Imin / A) / 10)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------- 部材統合
@@ -472,12 +598,26 @@ def write_excel(out_path, model, results, rows, elem_to_member, units,
 
     wb = openpyxl.Workbook()
 
+    # 断面性能(寸法からの板要素計算値)。未対応形状は None -> 空欄
+    props_by_sec = {sid: section_props(s) for sid, s in model["sections"].items()}
+    PROP_KEYS = ["A", "Iy", "Iz", "Zy", "Zz", "iy", "iz", "imin"]
+    PROP_HEADS = ["A(cm²)", "Iy(cm⁴)", "Iz(cm⁴)", "Zy(cm³)", "Zz(cm³)",
+                  "iy(cm)", "iz(cm)", "i min(cm)"]
+    PROP_ROUND = dict(A=2, Iy=1, Iz=1, Zy=1, Zz=1, iy=2, iz=2, imin=2)
+
+    def prop_cells(sid):
+        p = props_by_sec.get(sid)
+        if not p:
+            return [None] * len(PROP_KEYS)
+        return [round(p[k], PROP_ROUND[k]) for k in PROP_KEYS]
+
     ws = wb.active
     ws.title = "部材一覧"
     ul, uf, um = units["len"], units["force"], units["mom"]
-    head = ["部材ID", "タイプ", "断面ID", "断面名", "材料", "要素数", "構成要素ID",
-            "節点i", "節点j", "Xi", "Yi", "Zi", "Xj", "Yj", "Zj",
-            "部材長さL=座屈長さ({})".format(ul), "ダミー", "LC"]
+    head = (["部材ID", "タイプ", "断面ID", "断面名", "材料"] + PROP_HEADS
+            + ["要素数", "構成要素ID",
+               "節点i", "節点j", "Xi", "Yi", "Zi", "Xj", "Yj", "Zj",
+               "部材長さL=座屈長さ({})".format(ul), "ダミー", "LC"])
     for c in COMPS:
         u = uf if c in ("N", "Qy", "Qz") else um
         head += ["{}_max({})".format(c, u), "{}_min({})".format(c, u)]
@@ -486,11 +626,12 @@ def write_excel(out_path, model, results, rows, elem_to_member, units,
     for ri, r in enumerate(rows):
         if ri % 1000 == 0:
             _prog(progress, 55 + 15.0 * ri / n_rows, "Excel: 部材一覧を作成中")
-        base = [r["mid"], r["type"], r["sec_id"], r["sec"], r["mat"],
-                r["n_elem"], r["eids"], r["na"], r["nb"],
-                round(r["pa"][0], 1), round(r["pa"][1], 1), round(r["pa"][2], 1),
-                round(r["pb"][0], 1), round(r["pb"][1], 1), round(r["pb"][2], 1),
-                round(r["length"], 1), r["dummy"]]
+        base = ([r["mid"], r["type"], r["sec_id"], r["sec"], r["mat"]]
+                + prop_cells(r["sec_id"])
+                + [r["n_elem"], r["eids"], r["na"], r["nb"],
+                   round(r["pa"][0], 1), round(r["pa"][1], 1), round(r["pa"][2], 1),
+                   round(r["pb"][0], 1), round(r["pb"][1], 1), round(r["pb"][2], 1),
+                   round(r["length"], 1), r["dummy"]])
         for lc in lcs:  # 荷重ケースごとに1行
             row = base + [lc]
             for c in COMPS:
@@ -537,13 +678,17 @@ def write_excel(out_path, model, results, rows, elem_to_member, units,
     style_header(ws)
 
     ws = wb.create_sheet("断面リスト")
-    ws.append(["断面ID", "定義タイプ", "断面名", "形状", "寸法・定義データ"])
+    ws.append(["断面ID", "定義タイプ", "断面名", "形状"] + PROP_HEADS
+              + ["断面性能の算定", "寸法・定義データ"])
     for sid in sorted(model["sections"]):
         s = model["sections"][sid]
-        ws.append([s["id"], s["type"], s["name"], s["shape"], s["data"]])
+        note = ("板要素計算(フィレット・R無視)" if props_by_sec.get(sid)
+                else "未対応形状(手入力要)")
+        ws.append([s["id"], s["type"], s["name"], s["shape"]]
+                  + prop_cells(sid) + [note, s["data"]])
     style_header(ws)
     ws.column_dimensions["C"].width = 28
-    ws.column_dimensions["E"].width = 60
+    ws.column_dimensions["N"].width = 60
 
     ws = wb.create_sheet("節点座標")
     ws.append(["節点ID", "X({})".format(ul), "Y({})".format(ul), "Z({})".format(ul)])
