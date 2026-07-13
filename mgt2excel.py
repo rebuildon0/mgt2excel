@@ -30,8 +30,10 @@ from collections import defaultdict
 
 VERSION = "1.0.0"
 
-FORCE_TO_KN = {"TONF": 9.80665, "KGF": 9.80665e-3, "KN": 1.0, "N": 1e-3}
-LEN_TO_MM = {"MM": 1.0, "CM": 10.0, "M": 1000.0}
+FORCE_TO_KN = {"TONF": 9.80665, "KGF": 9.80665e-3, "KN": 1.0, "N": 1e-3,
+               "LBF": 4.4482216152605e-3, "KIPS": 4.4482216152605,
+               "KIP": 4.4482216152605}
+LEN_TO_MM = {"MM": 1.0, "CM": 10.0, "M": 1000.0, "IN": 25.4, "FT": 304.8}
 COS_TOL = 0.9999  # 約0.8度以内を同一直線とみなす
 COMPS = ["N", "Qy", "Qz", "Mt", "My", "Mz"]
 LINE_TYPES = ("BEAM", "TRUSS", "TENSTR", "COMPTR")  # 出力対象の線要素
@@ -220,7 +222,7 @@ def parse_anl(path, log=_print, progress=None):
     if b0 >= 0:
         m = _RE_UNIT.search(anl[b0])
         if m:
-            unit_force, unit_len = m.group(1).upper(), m.group(2).upper()
+            unit_force, unit_len = m.group(1), m.group(2)  # 表示用に原文のまま保持
         b1 = find("梁要素の断面力 ---", b0)
         cur_eid = cur_lc = None
         n_unmatched = 0
@@ -252,13 +254,20 @@ def parse_anl(path, log=_print, progress=None):
             log("警告: 梁断面力の {} 行は出力位置を解釈できず"
                 "集計対象外です".format(n_unmatched))
 
+    beam_unit_missing = (b0 >= 0 and unit_force is None)
     truss_forces = defaultdict(dict)  # eid -> {lc: (Ni, Nj)}
+    t_unit_force = t_unit_len = None
     t0 = find("トラス要素の断面力の出力")
     if t0 >= 0:
-        if unit_force is None:
-            m = _RE_UNIT.search(anl[t0])
-            if m:
-                unit_force, unit_len = m.group(1).upper(), m.group(2).upper()
+        m = _RE_UNIT.search(anl[t0])
+        if m:
+            t_unit_force, t_unit_len = m.group(1), m.group(2)
+            if unit_force is None:
+                # ANL 全体は同一単位系のため、同じファイル内のトラス単位を適用する
+                unit_force, unit_len = t_unit_force, t_unit_len
+        else:
+            log("警告: ANL のトラス断面力セクションに単位表記が見つかりません。"
+                "梁(または MGT)の単位系を仮定します(値の単位に注意)")
         t1 = find("トラス要素の応力度の出力", t0)
         cur_eid = None
         for ln in anl[t0:t1 if t1 > 0 else len(anl)]:
@@ -284,10 +293,20 @@ def parse_anl(path, log=_print, progress=None):
             if lc not in lcs:
                 lcs.append(lc)
 
+    if beam_unit_missing:
+        if t_unit_force:
+            log("警告: ANL の梁断面力セクションに単位表記が見つかりません。"
+                "同じ ANL 内のトラスセクションの単位({} , {})を適用します".format(
+                    t_unit_force, t_unit_len))
+        else:
+            log("警告: ANL の梁断面力セクションに単位表記が見つかりません。"
+                "MGT の単位系を仮定します(値の単位に注意)")
+
     log("ANL 読込: 梁要素 {} / トラス要素 {} / 荷重ケース {}".format(
         len(beam_forces), len(truss_forces), ", ".join(lcs)))
     return dict(beam_forces=beam_forces, truss_forces=truss_forces, lcs=lcs,
-                unit_force=unit_force, unit_len=unit_len)
+                unit_force=unit_force, unit_len=unit_len,
+                t_unit_force=t_unit_force, t_unit_len=t_unit_len)
 
 
 # ---------------------------------------------------------------- 断面性能
@@ -314,9 +333,11 @@ def _sec_nums(name):
     return [float(x) for x in re.findall(r"\d+(?:\.\d+)?", name)]
 
 
-def section_props(sec):
+def section_props(sec, to_mm=1.0):
     """断面性能を寸法から板要素として計算する(cm系)。
 
+    to_mm: MGT の長さ単位から mm への換算係数(寸法直接入力の断面に適用。
+           DB参照断面の呼称寸法は常に mm とみなす)。
     戻り値: dict(A, Iy, Iz, Zy, Zz, iy, iz, imin) / 未対応形状・寸法不明は None。
     Iy/Zy は強軸(局所y軸まわり=My に対応)、Iz/Zz は弱軸。
     フィレット・R を無視するため、圧延材の規格値より数%小さい(安全側)。
@@ -327,14 +348,14 @@ def section_props(sec):
         if not f:
             return None
         mode = f[0].strip()
-        if mode == "2":  # 寸法直接入力
+        if mode == "2":  # 寸法直接入力 (MGT の単位系 -> mm に換算)
             vals = []
             for x in f[1:]:
                 try:
-                    vals.append(float(x))
+                    vals.append(float(x) * to_mm)
                 except ValueError:
                     vals.append(0.0)
-        elif mode == "1":  # DB参照 -> 呼称から寸法を読む
+        elif mode == "1":  # DB参照 -> 呼称から寸法を読む(呼称は mm)
             vals = _sec_nums(f[2]) if len(f) > 2 else []
         else:
             return None
@@ -506,27 +527,62 @@ def build_members(model, results, groups, convert_units=True, log=_print,
     beam_forces, truss_forces = results["beam_forces"], results["truss_forces"]
     lcs = results["lcs"]
 
-    # 断面力(uf, ul_anl)は ANL の単位系、幾何量=座標・長さ(ul_geo)は MGT の単位系で換算する
-    uf = (results["unit_force"] or model["unit_force"]).upper()
-    ul_anl = (results["unit_len"] or model["unit_len"]).upper()
+    # 単位系の解決:
+    #   梁断面力  : ANL 梁セクションの単位 (raw_uf, raw_ul)
+    #   トラス断面力: ANL トラスセクションの単位 (無ければ梁と同じ)
+    #   幾何量(座標・長さ): MGT の *UNIT
+    raw_uf = results["unit_force"] or model["unit_force"]
+    raw_ul = results["unit_len"] or model["unit_len"]
+    raw_uf_t = results.get("t_unit_force") or raw_uf
+    raw_ul_t = results.get("t_unit_len") or raw_ul
+    uf, ul_anl = raw_uf.upper(), raw_ul.upper()
+    uf_t = raw_uf_t.upper()
     ul_geo = model["unit_len"].upper()
     if ul_anl != ul_geo:
         log("注意: 長さ単位が MGT({}) と ANL({}) で異なります。"
             "幾何量は MGT、モーメントは ANL の単位で換算します".format(ul_geo, ul_anl))
+    if uf_t != uf:
+        log("注意: ANL 内で梁({})とトラス({})の力の単位が異なります。"
+            "それぞれの単位で換算します".format(raw_uf, raw_uf_t))
     if convert_units:
-        if uf not in FORCE_TO_KN or ul_anl not in LEN_TO_MM or ul_geo not in LEN_TO_MM:
-            raise ValueError("未対応の単位系です: {} , {} / {}".format(uf, ul_anl, ul_geo))
+        unknown = [u for u, table in ((uf, FORCE_TO_KN), (uf_t, FORCE_TO_KN),
+                                      (ul_anl, LEN_TO_MM), (ul_geo, LEN_TO_MM))
+                   if u not in table]
+        if unknown:
+            raise ValueError(
+                "未対応の単位のため kN 換算できません: {}\n"
+                "対応単位: 力 {} / 長さ {}。換算オプションを外すか、"
+                "iGen の単位系を変更して出力し直してください".format(
+                    ", ".join(sorted(set(unknown))),
+                    ", ".join(sorted(FORCE_TO_KN)), ", ".join(sorted(LEN_TO_MM))))
         f_force = FORCE_TO_KN[uf]
+        f_force_t = FORCE_TO_KN[uf_t]
         f_mom = FORCE_TO_KN[uf] * LEN_TO_MM[ul_anl] / 1000.0  # -> kN·m
         f_len = LEN_TO_MM[ul_geo]
         u_force, u_mom, u_len = "kN", "kN·m", "mm"
     else:
         f_force = f_mom = f_len = 1.0
-        u_force, u_mom, u_len = uf, "{}·{}".format(uf, ul_anl), ul_geo
+        # 表示は ANL の単位をそのまま使う
+        u_force, u_mom, u_len = raw_uf, "{}·{}".format(raw_uf, raw_ul), model["unit_len"]
+        if uf_t != uf:
+            # 単位が混在すると1つの列見出しで表せないため、トラス値を梁の単位に揃える
+            if uf_t in FORCE_TO_KN and uf in FORCE_TO_KN:
+                f_force_t = FORCE_TO_KN[uf_t] / FORCE_TO_KN[uf]
+                log("注意: トラスの断面力を {} から {} に揃えて出力します".format(
+                    raw_uf_t, raw_uf))
+            else:
+                # 換算率が不明なら値はそのまま、見出しに両方の単位を明記して嘘をなくす
+                f_force_t = 1.0
+                u_force = "梁:{} トラス:{}".format(raw_uf, raw_uf_t)
+                log("警告: 力の単位({} / {})の換算率が不明なため、"
+                    "N 列は要素タイプごとに単位が異なります(見出し参照)".format(
+                        raw_uf, raw_uf_t))
+        else:
+            f_force_t = 1.0
     units = dict(force=u_force, mom=u_mom, len=u_len,
-                 f_force=f_force, f_mom=f_mom, f_len=f_len)
-    log("単位: 断面力 {} , {} / 幾何 {} -> {} / {} / {}".format(
-        uf, ul_anl, ul_geo, u_force, u_mom, u_len))
+                 f_force=f_force, f_force_t=f_force_t, f_mom=f_mom, f_len=f_len)
+    log("単位: 梁 {} , {} / トラス {} / 幾何 {} -> {} / {} / {}".format(
+        raw_uf, raw_ul, raw_uf_t, model["unit_len"], u_force, u_mom, u_len))
 
     rows = []
     elem_to_member = {}
@@ -559,7 +615,7 @@ def build_members(model, results, groups, convert_units=True, log=_print,
                 else:
                     fij = truss_forces.get(e["id"], {}).get(lc)
                     if fij:
-                        vals["N"].extend([fij[0] * f_force, fij[1] * f_force])
+                        vals["N"].extend([fij[0] * f_force_t, fij[1] * f_force_t])
             for c in COMPS:
                 if vals[c]:
                     agg[(lc, c, "max")] = max(vals[c])
@@ -599,7 +655,14 @@ def write_excel(out_path, model, results, rows, elem_to_member, units,
     wb = openpyxl.Workbook()
 
     # 断面性能(寸法からの板要素計算値)。未対応形状は None -> 空欄
-    props_by_sec = {sid: section_props(s) for sid, s in model["sections"].items()}
+    sec_to_mm = LEN_TO_MM.get(model["unit_len"].upper())
+    if sec_to_mm is None:
+        log("警告: MGT の長さ単位 {} が未対応のため断面性能は空欄になります".format(
+            model["unit_len"]))
+        props_by_sec = {sid: None for sid in model["sections"]}
+    else:
+        props_by_sec = {sid: section_props(s, sec_to_mm)
+                        for sid, s in model["sections"].items()}
     PROP_KEYS = ["A", "Iy", "Iz", "Zy", "Zz", "iy", "iz", "imin"]
     PROP_HEADS = ["A(cm²)", "Iy(cm⁴)", "Iz(cm⁴)", "Zy(cm³)", "Zz(cm³)",
                   "iy(cm)", "iz(cm)", "i min(cm)"]
@@ -648,6 +711,7 @@ def write_excel(out_path, model, results, rows, elem_to_member, units,
                "N({})".format(uf), "Qy({})".format(uf), "Qz({})".format(uf),
                "Mt({})".format(um), "My({})".format(um), "Mz({})".format(um)])
     f_force, f_mom, f_len = units["f_force"], units["f_mom"], units["f_len"]
+    f_force_t = units["f_force_t"]
     n_elems = max(1, len(model["elements"]))
     for ei, eid in enumerate(sorted(model["elements"])):
         if ei % 1000 == 0:
@@ -673,7 +737,7 @@ def write_excel(out_path, model, results, rows, elem_to_member, units,
                 if fij is None:
                     continue
                 for pt, val in zip(("I", "J"), fij):
-                    ws.append(base + [lc, pt, round(val * f_force, 3),
+                    ws.append(base + [lc, pt, round(val * f_force_t, 3),
                                       None, None, None, None, None])
     style_header(ws)
 

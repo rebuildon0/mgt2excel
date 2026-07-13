@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """mgt2excel のユニットテスト
 
 実行: py -3 -m unittest test_mgt2excel -v
@@ -9,7 +9,8 @@ import tempfile
 import unittest
 
 from mgt2excel import (FORCE_TO_KN, LEN_TO_MM, _expand_list, _pt_order,
-                       merge_members, parse_anl, parse_mgt, section_props)
+                       build_members, merge_members, parse_anl, parse_mgt,
+                       section_props)
 
 
 def _make_model(elements, releases=None, supports=None):
@@ -61,6 +62,12 @@ class TestUnitFactors(unittest.TestCase):
         self.assertEqual(LEN_TO_MM["MM"], 1.0)
         self.assertEqual(LEN_TO_MM["CM"], 10.0)
         self.assertEqual(LEN_TO_MM["M"], 1000.0)
+
+    def test_imperial(self):
+        self.assertAlmostEqual(FORCE_TO_KN["LBF"], 4.4482216152605e-3)
+        self.assertAlmostEqual(FORCE_TO_KN["KIPS"], 4.4482216152605)
+        self.assertEqual(LEN_TO_MM["IN"], 25.4)
+        self.assertEqual(LEN_TO_MM["FT"], 304.8)
 
 
 class TestMergeOrientation(unittest.TestCase):
@@ -224,6 +231,205 @@ class TestParseAnlMidpoint(unittest.TestCase):
                          ["I", "1/4", "CNT", "3/4", "J"])
 
 
+class TestUnitConversion(unittest.TestCase):
+    """ANL の単位系が何であっても、換算ON=kN/kN·m/mm、換算OFF=元単位表示になること"""
+
+    def _run(self, unit_line, convert):
+        fd_m, mgt_p = tempfile.mkstemp(suffix=".mgt")
+        fd_a, anl_p = tempfile.mkstemp(suffix=".anl")
+        os.close(fd_m)
+        os.close(fd_a)
+        try:
+            with open(mgt_p, "w", encoding="cp932") as f:
+                f.write(MGT_FIXTURE)
+            with open(anl_p, "w", encoding="cp932") as f:
+                f.write(ANL_FIXTURE.replace("tonf , mm", unit_line))
+            model = parse_mgt(mgt_p, log=_quiet)
+            results = parse_anl(anl_p, log=_quiet)
+            groups = merge_members(model, log=_quiet)
+            rows, _, units = build_members(model, results, groups,
+                                           convert_units=convert, log=_quiet)
+            return rows, units
+        finally:
+            os.unlink(mgt_p)
+            os.unlink(anl_p)
+
+    def test_convert_kn_m(self):
+        rows, units = self._run("kN , m", True)
+        agg = rows[0]["agg"]
+        self.assertAlmostEqual(agg[("ΣDL", "N", "max")], 1.0)      # kN のまま
+        self.assertAlmostEqual(agg[("ΣDL", "Mz", "max")], 8.0)     # kN·m -> kN·m
+        self.assertEqual((units["force"], units["mom"], units["len"]),
+                         ("kN", "kN·m", "mm"))
+        self.assertAlmostEqual(rows[0]["length"], 2000.0)          # MGT は mm
+
+    def test_convert_tonf_mm(self):
+        rows, _ = self._run("tonf , mm", True)
+        agg = rows[0]["agg"]
+        self.assertAlmostEqual(agg[("ΣDL", "N", "max")], 9.80665)
+        self.assertAlmostEqual(agg[("ΣDL", "Mz", "max")], 8 * 9.80665e-3)
+
+    def test_convert_kgf_cm(self):
+        rows, _ = self._run("kgf , cm", True)
+        agg = rows[0]["agg"]
+        self.assertAlmostEqual(agg[("ΣDL", "N", "max")], 9.80665e-3)
+        self.assertAlmostEqual(agg[("ΣDL", "Mz", "max")],
+                               8 * 9.80665e-3 * 10 / 1000)
+
+    def test_no_convert_keeps_values_and_labels(self):
+        rows, units = self._run("kN , m", False)
+        agg = rows[0]["agg"]
+        self.assertAlmostEqual(agg[("ΣDL", "N", "max")], 1.0)
+        self.assertAlmostEqual(agg[("ΣDL", "Mz", "max")], 8.0)
+        self.assertEqual((units["force"], units["mom"], units["len"]),
+                         ("kN", "kN·m", "MM"))  # 幾何は MGT の単位表示
+
+    def test_unknown_unit_raises_when_converting(self):
+        with self.assertRaises(ValueError):
+            self._run("poundal , mm", True)
+
+    def test_unknown_unit_ok_without_convert(self):
+        rows, units = self._run("poundal , mm", False)
+        self.assertEqual(units["force"], "poundal")
+        self.assertAlmostEqual(rows[0]["agg"][("ΣDL", "N", "max")], 1.0)
+
+
+MGT_MIX = MGT_FIXTURE.replace(
+    "*ELEMENT",
+    "*ELEMENT\n    3, TENSTR,   1,    2,     1,     3,     0,     1,     0,     0,    NO")\
+    .replace(
+    "    1, DBUSER, H200, CC, 0, 0, 0, 0, 0, 0, YES, NO, H, 2, 200, 100, 5.5, 8, 100, 8, 0, 0, 0, 0",
+    "    1, DBUSER, H200, CC, 0, 0, 0, 0, 0, 0, YES, NO, H, 2, 200, 100, 5.5, 8, 100, 8, 0, 0, 0, 0\n"
+    "    2, DBUSER, PHI16, CC, 0, 0, 0, 0, 0, 0, YES, NO, SR, 2, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0")
+
+ANL_TRUSS_KN = """ トラス要素の断面力の出力                                                           単位系 : kN , m
+
+  要素   材料   断面       LC          断面力-I    断面力-J
+------ ------ ------ -------- ---- ----------- -----------
+     3      1      2      ΣDL              2.0         2.0
+"""
+
+
+class TestMixedUnits(unittest.TestCase):
+    """梁(tonf)とトラス(kN)で単位が異なる ANL、トラスのみの ANL の単位処理"""
+
+    def _run(self, mgt_text, anl_text, convert):
+        fd_m, mgt_p = tempfile.mkstemp(suffix=".mgt")
+        fd_a, anl_p = tempfile.mkstemp(suffix=".anl")
+        os.close(fd_m)
+        os.close(fd_a)
+        try:
+            with open(mgt_p, "w", encoding="cp932") as f:
+                f.write(mgt_text)
+            with open(anl_p, "w", encoding="cp932") as f:
+                f.write(anl_text)
+            model = parse_mgt(mgt_p, log=_quiet)
+            results = parse_anl(anl_p, log=_quiet)
+            groups = merge_members(model, log=_quiet)
+            rows, _, units = build_members(model, results, groups,
+                                           convert_units=convert, log=_quiet)
+            return rows, units
+        finally:
+            os.unlink(mgt_p)
+            os.unlink(anl_p)
+
+    def _truss_row(self, rows):
+        return next(r for r in rows if r["type"] == "TENSTR")
+
+    def test_mixed_units_convert_on(self):
+        """梁 tonf / トラス kN -> それぞれの係数で kN へ"""
+        rows, units = self._run(MGT_MIX, ANL_FIXTURE + "\n" + ANL_TRUSS_KN, True)
+        beam = next(r for r in rows if r["type"] == "BEAM")
+        truss = self._truss_row(rows)
+        self.assertAlmostEqual(beam["agg"][("ΣDL", "N", "max")], 9.80665)
+        self.assertAlmostEqual(truss["agg"][("ΣDL", "N", "max")], 2.0)  # kN のまま
+        self.assertEqual(units["force"], "kN")
+
+    def test_mixed_units_convert_off_rescales_truss(self):
+        """換算OFF: トラス値を梁の単位(tonf)に揃え、見出しは tonf のまま真になる"""
+        rows, units = self._run(MGT_MIX, ANL_FIXTURE + "\n" + ANL_TRUSS_KN, False)
+        truss = self._truss_row(rows)
+        self.assertAlmostEqual(truss["agg"][("ΣDL", "N", "max")],
+                               2.0 / 9.80665, places=6)
+        self.assertEqual(units["force"], "tonf")
+
+    def test_mixed_unknown_unit_convert_off_labels_both(self):
+        """換算率不明の混在: 値はそのまま、見出しに両方の単位を明記"""
+        anl = ANL_FIXTURE + "\n" + ANL_TRUSS_KN.replace("kN , m", "poundal , m")
+        rows, units = self._run(MGT_MIX, anl, False)
+        truss = self._truss_row(rows)
+        self.assertAlmostEqual(truss["agg"][("ΣDL", "N", "max")], 2.0)
+        self.assertIn("tonf", units["force"])
+        self.assertIn("poundal", units["force"])
+
+    def test_truss_only_anl(self):
+        """トラスセクションしか無い ANL でも単位を拾って変換できる"""
+        rows, units = self._run(MGT_MIX, ANL_TRUSS_KN, True)
+        truss = self._truss_row(rows)
+        self.assertAlmostEqual(truss["agg"][("ΣDL", "N", "max")], 2.0)
+        self.assertEqual(units["force"], "kN")
+
+    def test_mixed_case_unit_token(self):
+        """単位トークンの大文字小文字は無視して換算される"""
+        anl = ANL_FIXTURE.replace("tonf , mm", "Kn , M")
+        rows, units = self._run(MGT_FIXTURE, anl, True)
+        self.assertAlmostEqual(rows[0]["agg"][("ΣDL", "N", "max")], 1.0)
+
+    def test_beam_header_missing_uses_truss_unit(self):
+        """梁の単位表記が無くトラスに有る場合、同一ANL内のトラス単位を適用し警告する"""
+        anl = (ANL_FIXTURE.replace("単位系 : tonf , mm", "                  ")
+               + "\n" + ANL_TRUSS_KN)
+        fd_m, mgt_p = tempfile.mkstemp(suffix=".mgt")
+        fd_a, anl_p = tempfile.mkstemp(suffix=".anl")
+        os.close(fd_m)
+        os.close(fd_a)
+        try:
+            with open(mgt_p, "w", encoding="cp932") as f:
+                f.write(MGT_MIX)
+            with open(anl_p, "w", encoding="cp932") as f:
+                f.write(anl)
+            warnings = []
+            model = parse_mgt(mgt_p, log=_quiet)
+            results = parse_anl(anl_p, log=warnings.append)
+            self.assertTrue(any("トラスセクションの単位" in w for w in warnings))
+            groups = merge_members(model, log=_quiet)
+            rows, _, units = build_members(model, results, groups,
+                                           convert_units=True, log=_quiet)
+            beam = next(r for r in rows if r["type"] == "BEAM")
+            # 梁は kN(トラス単位) として換算される。MGT(TONF) は使わない
+            self.assertAlmostEqual(beam["agg"][("ΣDL", "N", "max")], 1.0)
+            self.assertEqual(units["force"], "kN")
+        finally:
+            os.unlink(mgt_p)
+            os.unlink(anl_p)
+
+    def test_missing_unit_header_warns_and_falls_back(self):
+        """単位表記が無い ANL は警告を出して MGT の単位を仮定する"""
+        anl = ANL_FIXTURE.replace(
+            "単位系 : tonf , mm", "                    ")
+        fd_m, mgt_p = tempfile.mkstemp(suffix=".mgt")
+        fd_a, anl_p = tempfile.mkstemp(suffix=".anl")
+        os.close(fd_m)
+        os.close(fd_a)
+        try:
+            with open(mgt_p, "w", encoding="cp932") as f:
+                f.write(MGT_FIXTURE)
+            with open(anl_p, "w", encoding="cp932") as f:
+                f.write(anl)
+            warnings = []
+            model = parse_mgt(mgt_p, log=_quiet)
+            results = parse_anl(anl_p, log=warnings.append)
+            self.assertTrue(any("単位表記が見つかりません" in w for w in warnings))
+            groups = merge_members(model, log=_quiet)
+            rows, _, _ = build_members(model, results, groups,
+                                       convert_units=True, log=_quiet)
+            # MGT の TONF を仮定して換算される
+            self.assertAlmostEqual(rows[0]["agg"][("ΣDL", "N", "max")], 9.80665)
+        finally:
+            os.unlink(mgt_p)
+            os.unlink(anl_p)
+
+
 class TestSectionProps(unittest.TestCase):
     """断面性能の板要素計算(cm系)。圧延材はフィレット無視のためJIS規格値よりやや小さい"""
 
@@ -256,6 +462,17 @@ class TestSectionProps(unittest.TestCase):
 
     def test_unsupported_shape(self):
         self.assertIsNone(section_props(dict(shape="T", fields=["2", "100"])))
+
+    def test_to_mm_scaling(self):
+        """MGT が cm 単位でも to_mm 換算で mm 定義と同じ結果になること"""
+        mm = section_props(dict(shape="H",
+                                fields=["2", "200", "100", "5.5", "8",
+                                        "100", "8"]))
+        cm = section_props(dict(shape="H",
+                                fields=["2", "20", "10", "0.55", "0.8",
+                                        "10", "0.8"]), to_mm=10.0)
+        self.assertAlmostEqual(mm["A"], cm["A"], places=6)
+        self.assertAlmostEqual(mm["Iy"], cm["Iy"], places=4)
 
 
 if __name__ == "__main__":
