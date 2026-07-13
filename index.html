@@ -164,9 +164,9 @@ worker.onmessage = (e) => {
     running = false;
     const blob = new Blob([m.bytes], {type:
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
-    const url = URL.createObjectURL(blob);
     const a = $("dlink");
-    a.href = url;
+    if (a.href.startsWith("blob:")) URL.revokeObjectURL(a.href);  // 前回分を解放
+    a.href = URL.createObjectURL(blob);
     a.download = m.filename;
     $("dl").style.display = "block";
     $("status").textContent = "変換が完了しました。";
@@ -223,7 +223,16 @@ $("run").addEventListener("click", async () => {
   $("dl").style.display = "none";
   $("log").textContent = "";
   $("status").textContent = "変換中…（大きなモデルでは数分かかります）";
-  const [mgtBuf, anlBuf] = await Promise.all([mgtFile.arrayBuffer(), anlFile.arrayBuffer()]);
+  let mgtBuf, anlBuf;
+  try {
+    [mgtBuf, anlBuf] = await Promise.all([mgtFile.arrayBuffer(), anlFile.arrayBuffer()]);
+  } catch (err) {
+    running = false;
+    appendLog("ファイルの読み込みに失敗しました。選択後にファイルが変更・削除された可能性があります。");
+    $("status").textContent = "ファイルを読み込めませんでした。もう一度ファイルを選んでください。";
+    refresh();
+    return;
+  }
   const outName = mgtFile.name.replace(/\.mgt$/i, "") + "_断面算定データ.xlsx";
   worker.postMessage({
     type: "convert",

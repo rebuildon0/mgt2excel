@@ -8,9 +8,10 @@ let pyodide = null;
 
 async function init() {
   pyodide = await loadPyodide();
+  // openpyxl はバージョン固定でインストール(将来のリリースで挙動が変わるのを防ぐ)
   await pyodide.loadPackage("micropip");
   const micropip = pyodide.pyimport("micropip");
-  await micropip.install("openpyxl");
+  await micropip.install("openpyxl==3.1.5");
   const resp = await fetch("mgt2excel.py?v=" + Date.now());
   if (!resp.ok) throw new Error("mgt2excel.py の取得に失敗しました");
   pyodide.FS.writeFile("/home/pyodide/mgt2excel.py", await resp.text());
@@ -26,7 +27,8 @@ function convert(msg) {
   pyodide.globals.set("opt_supports", msg.supports);
   pyodide.globals.set("opt_releases", msg.releases);
   pyodide.globals.set("opt_units", msg.units);
-  pyodide.runPython(`
+  try {
+    pyodide.runPython(`
 import mgt2excel
 mgt2excel.convert(
     "/tmp/model.mgt", "/tmp/model.anl", "/tmp/out.xlsx",
@@ -36,12 +38,14 @@ mgt2excel.convert(
     log=js_log,
 )
 `);
-  const bytes = pyodide.FS.readFile("/tmp/out.xlsx");
-  // 一時ファイルを掃除
-  for (const p of ["/tmp/model.mgt", "/tmp/model.anl", "/tmp/out.xlsx"]) {
-    try { pyodide.FS.unlink(p); } catch (e) { /* noop */ }
+    const bytes = pyodide.FS.readFile("/tmp/out.xlsx");
+    postMessage({ type: "done", bytes: bytes.buffer, filename: msg.filename }, [bytes.buffer]);
+  } finally {
+    // Python 例外時も一時ファイルを掃除する
+    for (const p of ["/tmp/model.mgt", "/tmp/model.anl", "/tmp/out.xlsx"]) {
+      try { pyodide.FS.unlink(p); } catch (e) { /* noop */ }
+    }
   }
-  postMessage({ type: "done", bytes: bytes.buffer, filename: msg.filename }, [bytes.buffer]);
 }
 
 self.onmessage = async (e) => {
