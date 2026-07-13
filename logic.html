@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>部材統合ロジック説明書 — MGT2Excel</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏗️</text></svg>">
+<style>
+  :root {
+    --ink: #1a2433; --sub: #5a6b80; --line: #d8dfe8;
+    --blue: #2563c4; --blue-bg: #eaf1fb;
+    --red: #c2483d; --red-bg: #faeeec;
+    --green: #2c7a4b; --green-bg: #eaf5ee;
+    --amber-bg: #fdf6e3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 16px 80px;
+    font-family: "Yu Gothic UI", "Meiryo", "Hiragino Kaku Gothic ProN", sans-serif;
+    color: var(--ink); background: #fafbfc; line-height: 1.9;
+  }
+  main { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 26px; border-bottom: 3px solid var(--blue); padding: 24px 0 10px; }
+  h1 small { display: block; font-size: 13px; color: var(--sub); font-weight: normal; margin-top: 6px; }
+  h2 {
+    font-size: 20px; margin-top: 56px; padding: 6px 12px;
+    background: var(--blue-bg); border-left: 5px solid var(--blue); border-radius: 3px;
+  }
+  h3 { font-size: 16px; margin-top: 32px; color: var(--blue); }
+  p { margin: 12px 0; }
+  figure { margin: 20px 0; text-align: center; }
+  figure svg { max-width: 100%; height: auto; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+  figcaption { font-size: 13px; color: var(--sub); margin-top: 6px; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: #f0f4f9; }
+  code { background: #eef1f5; border-radius: 4px; padding: 1px 6px; font-family: Consolas, monospace; font-size: 0.92em; }
+  .note { background: var(--amber-bg); border-left: 5px solid #d9a520; border-radius: 3px; padding: 10px 14px; margin: 16px 0; font-size: 14px; }
+  .ok  { color: var(--green); font-weight: bold; }
+  .ng  { color: var(--red); font-weight: bold; }
+  .box-ok { background: var(--green-bg); }
+  .box-ng { background: var(--red-bg); }
+  .cond {
+    background: #fff; border: 1px solid var(--line); border-radius: 8px;
+    padding: 14px 18px; margin: 14px 0;
+  }
+  .cond b.tag {
+    display: inline-block; background: var(--blue); color: #fff; border-radius: 14px;
+    font-size: 13px; padding: 1px 12px; margin-right: 8px;
+  }
+  .toc { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px 24px; font-size: 14px; }
+  .toc a { color: var(--blue); text-decoration: none; }
+  footer { margin-top: 64px; font-size: 12px; color: var(--sub); border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>「一本部材」判定の仕組み
+<small>MGT2Excel（midas iGen MGT/ANL → 断面算定用 Excel 変換ツール）技術説明書</small>
+</h1>
+
+<nav class="toc" style="margin-bottom:14px">
+<a href="index.html">← ツールを開く</a> ／ <a href="manual.html">使い方</a>
+</nav>
+
+<nav class="toc">
+<b>目次</b><br>
+1. <a href="#sec1">なぜ統合が必要か</a> ／
+2. <a href="#sec2">前提となる用語</a> ／
+3. <a href="#sec3">判定の全体像</a> ／
+4. <a href="#sec4">節点での連結条件（5つ）</a> ／
+5. <a href="#sec5">ケース別の判定例</a> ／
+6. <a href="#sec6">グループ化の仕組み（Union-Find）</a> ／
+7. <a href="#sec7">座屈長さと断面力の集計</a> ／
+8. <a href="#sec8">限界と注意点</a>
+</nav>
+
+<h2 id="sec1">1. なぜ統合が必要か</h2>
+<p>
+解析モデルでは、実際には1本の部材（母屋・胴縁・弦材など）が、小梁の取り付きや床の分割に
+合わせて<b>複数の要素に分割</b>されていることがよくあります。
+解析上はそれで問題ありませんが、<b>断面算定で座屈長さを取るときは「実際の1本」の長さ</b>が必要です。
+分割要素の長さをそのまま座屈長さにすると、実際より短い＝危険側の評価になってしまいます。
+</p>
+<figure>
+<svg viewBox="0 0 760 200" xmlns="http://www.w3.org/2000/svg" font-family="Meiryo,sans-serif">
+  <text x="30" y="34" font-size="14" fill="#5a6b80">解析モデル（3要素に分割されている）</text>
+  <line x1="60" y1="70" x2="700" y2="70" stroke="#8899aa" stroke-width="5"/>
+  <g fill="#fff" stroke="#2563c4" stroke-width="2.5">
+    <circle cx="60" cy="70" r="7"/><circle cx="273" cy="70" r="7"/>
+    <circle cx="487" cy="70" r="7"/><circle cx="700" cy="70" r="7"/>
+  </g>
+  <g font-size="13" fill="#2563c4" text-anchor="middle">
+    <text x="166" y="58">要素 101</text><text x="380" y="58">要素 102</text><text x="593" y="58">要素 103</text>
+  </g>
+  <g stroke="#aab6c4" stroke-width="2">
+    <line x1="273" y1="70" x2="273" y2="108"/>
+  </g>
+  <g font-size="12" fill="#5a6b80" text-anchor="middle">
+    <text x="273" y="126">小梁が取り付く節点</text>
+    <text x="487" y="100">モデル分割のためだけの節点</text>
+    <text x="487" y="118">（どちらも通し材自身の端部にピンは無い）</text>
+  </g>
+  <text x="30" y="164" font-size="14" fill="#2c7a4b">ツールの判定後 → 1本の部材 M0001（座屈長さ = 通し長さ L）</text>
+  <line x1="60" y1="185" x2="700" y2="185" stroke="#2c7a4b" stroke-width="6"/>
+  <g fill="#2c7a4b">
+    <circle cx="60" cy="185" r="7"/><circle cx="700" cy="185" r="7"/>
+  </g>
+</svg>
+<figcaption>図1: 分割された3要素を「一本部材」として統合し、通し長さを座屈長さとする</figcaption>
+</figure>
+
+<h2 id="sec2">2. 前提となる用語</h2>
+<table>
+<tr><th style="width:9em">用語</th><th>意味</th></tr>
+<tr><td>節点（ノード）</td><td>モデル上の点。座標 (X, Y, Z) を持つ。要素は必ず2つの節点を結ぶ</td></tr>
+<tr><td>要素（エレメント）</td><td>解析の最小単位の線材。<b>I 端（始点）と J 端（終点）</b>を持ち、タイプ（BEAM＝梁、TENSTR＝引張専用トラス等）・材料・断面・β角（断面の回転角）が割り当てられている</td></tr>
+<tr><td>部材（メンバー）</td><td><b>このツールが要素をまとめて作る単位</b>。設計者が「1本」と認識する材に対応させることを狙う</td></tr>
+<tr><td>梁端解放（ピン）</td><td>要素の端部で曲げ等を伝えない設定（MGT の <code>*FRAME-RLS</code>）。フランジ継手のないボルトピン接合などに使われる</td></tr>
+<tr><td>支点</td><td>変位や回転を拘束された節点（MGT の <code>*CONSTRAINT</code>）</td></tr>
+</table>
+
+<h2 id="sec3">3. 判定の全体像</h2>
+<p>判定は「<b>節点ごとに、そこで出会う2要素がつながるかどうか</b>」を見る、というシンプルな考え方です。</p>
+<ol>
+<li>全要素について、両端の節点を調べ、「節点 → その節点に取り付く要素」の対応表を作る</li>
+<li>各節点で、後述の<b>5条件</b>をすべて満たす要素ペアを「連結」と判定する</li>
+<li>連結judgの結果をグループ化（Union-Find、6章）し、つながった要素の集まり＝<b>1部材</b>とする</li>
+<li>どの要素とも連結しなかった要素は、それ単独で1部材になる</li>
+</ol>
+<p>
+ポイントは、<b>部材の形を先に仮定しない</b>ことです。節点単位の局所的な判定を積み上げるだけで、
+何要素に分割されていても（10分割でも）自然に1本にまとまります。
+</p>
+
+<h2 id="sec4">4. 節点での連結条件（5つ）</h2>
+<p>ある節点で出会う2つの要素は、<b>次の5条件をすべて満たすときだけ</b>連結されます。</p>
+
+<div class="cond">
+<b class="tag">条件 1</b><b>同じ属性であること</b>
+<p>要素タイプ（BEAM / TENSTR 等）・材料・断面・β角（断面の回転）がすべて一致すること。
+断面が H-300 から H-250 に変わる点は継手＝部材の切れ目とみなします。</p>
+</div>
+
+<div class="cond">
+<b class="tag">条件 2</b><b>同一直線上にあること</b>
+<p>2要素の方向ベクトルのなす角が<b>約 0.8°以内</b>（cos&thinsp;&gt;&thinsp;0.9999）であること。
+折れ曲がる点（山形の頂点など）では切れます。座標誤差程度の微小な角度は許容されます。</p>
+<p>比較の際は「節点を<b>通過する向き</b>」に揃えてから角度を測ります。要素の I→J の向きは
+モデリング順で決まっていてバラバラなので、節点に J 端で到達する要素はそのまま、
+I 端で到達する要素は向きを反転して比較します（これにより I-I、I-J、J-I、J-J の
+どの組み合わせでも正しく判定できます）。</p>
+<figure>
+<svg viewBox="0 0 760 170" xmlns="http://www.w3.org/2000/svg" font-family="Meiryo,sans-serif">
+  <g>
+    <line x1="40" y1="60" x2="360" y2="60" stroke="#8899aa" stroke-width="4"/>
+    <circle cx="200" cy="60" r="6" fill="#fff" stroke="#2563c4" stroke-width="2.5"/>
+    <g stroke="#2563c4" stroke-width="2.5" fill="none">
+      <path d="M150 45 h34 m0 0 l-8 -6 m8 6 l-8 6"/>
+      <path d="M250 45 h34 m0 0 l-8 -6 m8 6 l-8 6"/>
+    </g>
+    <text x="200" y="100" font-size="13" text-anchor="middle" fill="#2c7a4b" font-weight="bold">向きを揃えると平行 → 連結</text>
+    <text x="60" y="42" font-size="12" fill="#5a6b80">要素A</text>
+    <text x="300" y="42" font-size="12" fill="#5a6b80">要素B</text>
+  </g>
+  <g>
+    <line x1="430" y1="90" x2="580" y2="55" stroke="#8899aa" stroke-width="4"/>
+    <line x1="580" y1="55" x2="730" y2="90" stroke="#8899aa" stroke-width="4"/>
+    <circle cx="580" cy="55" r="6" fill="#fff" stroke="#c2483d" stroke-width="2.5"/>
+    <path d="M545 75 a40 40 0 0 1 70 0" stroke="#c2483d" stroke-width="1.6" fill="none"/>
+    <text x="580" y="43" font-size="12" text-anchor="middle" fill="#c2483d">折れ点</text>
+    <text x="580" y="130" font-size="13" text-anchor="middle" fill="#c2483d" font-weight="bold">角度がつく → 切る</text>
+  </g>
+</svg>
+<figcaption>図2: 直線性の判定。向きを節点通過方向に揃えてから角度を比較する</figcaption>
+</figure>
+</div>
+
+<div class="cond">
+<b class="tag">条件 3</b><b>同属性の要素がその節点にちょうど2本であること</b>
+<p>同じ属性の要素が節点に3本以上集まっている場合、どれとどれが「1本」なのか
+幾何だけでは決められない（X形の交差など）ため、<b>安全側としてその節点では統合しません</b>。</p>
+</div>
+
+<div class="cond">
+<b class="tag">条件 4</b><b>節点が支点でないこと</b>
+<p>支点（<code>*CONSTRAINT</code> の節点）は部材が横方向に押さえられる点なので、
+座屈長さの区切りとして<b>そこで必ず切ります</b>。GUI のオプションで OFF にもできます。</p>
+</div>
+
+<div class="cond">
+<b class="tag">条件 5</b><b>共有節点側の要素端にピン（梁端解放）がないこと</b>
+<p>2要素のどちらかが、その共有節点側の端部に梁端解放（<code>*FRAME-RLS</code> のいずれかの成分の解放）を
+持っていれば、そこは構造的な継ぎ目＝部材の切れ目とみなします。
+判定するのは<b>共有節点側の端部だけ</b>で、部材の外側の端部にピンがあっても統合は妨げません。
+GUI のオプションで OFF にもできます。</p>
+<p><b>注意（混同しやすい点）:</b> 見るのは<b>通し材（統合しようとしている2要素）自身の端部条件</b>だけです。
+その節点に取り付く<b>小梁やブレースの側</b>の端部がピン接合でも、通し材の統合には影響しません。
+逆に、通し材自身の要素端にピンが設定されていれば、そこは継手＝1本の終わりとして必ず切ります。</p>
+</div>
+
+<h2 id="sec5">5. ケース別の判定例</h2>
+<table>
+<tr><th style="width:24em">ケース</th><th style="width:5em">判定</th><th>理由</th></tr>
+<tr class="box-ok"><td>直線上に同断面が連続し、中間節点に<b>小梁やブレースが取り付く</b></td><td class="ok">統合する</td><td>取り付く相手は属性が違うので条件1で対象外。本体2本は5条件を満たす（条件3の「同属性2本」も満たす）</td></tr>
+<tr class="box-ok"><td>要素のモデリング向き（I→J）が互い違い</td><td class="ok">統合する</td><td>条件2で向きを節点通過方向に揃えてから比較するため影響しない</td></tr>
+<tr class="box-ng"><td>中間節点が<b>支点</b>（柱頭・壁上など）</td><td class="ng">切る</td><td>条件4。座屈長さは支点間で取る</td></tr>
+<tr class="box-ng"><td>中間節点側の端部に<b>ピン（梁端解放）</b></td><td class="ng">切る</td><td>条件5。継手位置＝1本の終わり</td></tr>
+<tr class="box-ng"><td><b>断面や材料が変わる</b>（H-300 → H-250）</td><td class="ng">切る</td><td>条件1。継手とみなす</td></tr>
+<tr class="box-ng"><td>山形の<b>頂点で折れる</b>（登り梁どうし）</td><td class="ng">切る</td><td>条件2。直線でない</td></tr>
+<tr class="box-ng"><td>同断面ブレースが<b>X形に交差</b>する節点</td><td class="ng">切る</td><td>条件3。同属性が4本集まり、ペアが曖昧</td></tr>
+</table>
+<figure>
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-family="Meiryo,sans-serif">
+  <!-- OK: through with sub-beam -->
+  <g>
+    <text x="30" y="28" font-size="13" fill="#2c7a4b" font-weight="bold">✓ 統合する: 小梁が付いても直線・同断面</text>
+    <line x1="40" y1="65" x2="340" y2="65" stroke="#2c7a4b" stroke-width="5"/>
+    <line x1="190" y1="65" x2="190" y2="115" stroke="#aab6c4" stroke-width="3"/>
+    <circle cx="190" cy="65" r="6" fill="#fff" stroke="#2c7a4b" stroke-width="2.5"/>
+    <text x="204" y="105" font-size="12" fill="#5a6b80">小梁（属性が違う）</text>
+  </g>
+  <!-- NG: support -->
+  <g>
+    <text x="420" y="28" font-size="13" fill="#c2483d" font-weight="bold">× 切る: 中間節点が支点</text>
+    <line x1="430" y1="65" x2="580" y2="65" stroke="#8899aa" stroke-width="5"/>
+    <line x1="580" y1="65" x2="730" y2="65" stroke="#8899aa" stroke-width="5"/>
+    <circle cx="580" cy="65" r="6" fill="#fff" stroke="#c2483d" stroke-width="2.5"/>
+    <path d="M580 71 l-14 22 h28 z" fill="none" stroke="#c2483d" stroke-width="2"/>
+    <line x1="558" y1="100" x2="602" y2="100" stroke="#c2483d" stroke-width="2"/>
+  </g>
+  <!-- NG: pin -->
+  <g>
+    <text x="30" y="170" font-size="13" fill="#c2483d" font-weight="bold">× 切る: 共有節点側にピン</text>
+    <line x1="40" y1="210" x2="188" y2="210" stroke="#8899aa" stroke-width="5"/>
+    <line x1="196" y1="210" x2="340" y2="210" stroke="#8899aa" stroke-width="5"/>
+    <circle cx="192" cy="210" r="8" fill="#fff" stroke="#c2483d" stroke-width="2.5"/>
+    <text x="192" y="245" font-size="12" fill="#c2483d" text-anchor="middle">梁端解放（FRAME-RLS）</text>
+  </g>
+  <!-- NG: X brace -->
+  <g>
+    <text x="420" y="170" font-size="13" fill="#c2483d" font-weight="bold">× 切る: 同断面がX形に交差（4本）</text>
+    <line x1="450" y1="180" x2="710" y2="260" stroke="#8899aa" stroke-width="4"/>
+    <line x1="450" y1="260" x2="710" y2="180" stroke="#8899aa" stroke-width="4"/>
+    <circle cx="580" cy="220" r="6" fill="#fff" stroke="#c2483d" stroke-width="2.5"/>
+    <text x="580" y="292" font-size="12" fill="#5a6b80" text-anchor="middle">どのペアが「1本」か曖昧 → 統合しない</text>
+  </g>
+</svg>
+<figcaption>図3: 代表的な判定例</figcaption>
+</figure>
+
+<h2 id="sec6">6. グループ化の仕組み（Union-Find）</h2>
+<p>
+節点ごとの「この2要素は連結」という判定結果を部材にまとめる処理には、
+<b>Union-Find（素集合データ構造）</b>という定番のアルゴリズムを使っています。
+</p>
+<ol>
+<li>最初、全要素は「自分ひとりのグループ」に属する</li>
+<li>「要素AとBは連結」と判定されるたびに、Aのグループ と Bのグループ を<b>合併（union）</b>する</li>
+<li>すべての節点を処理し終えたら、同じグループに属する要素の集まりが1部材</li>
+</ol>
+<p>
+たとえば図1の要素 101–102 が節点で連結、102–103 が別の節点で連結なら、
+101・102・103 は自動的に同じグループ＝1部材になります。連結判定は常に隣どうしの
+局所判定だけで済み、順番にも依存しません。
+</p>
+
+<h2 id="sec7">7. 座屈長さと断面力の集計</h2>
+<h3>部材長さ（＝座屈長さ）</h3>
+<p>
+部材の長さは<b>構成要素の長さの合計</b>です。統合条件に直線性が入っているため、
+これは両端節点間の直線距離と一致します（ツール内部では両者の一致を検証済み）。
+出力される「部材長さ L」を、強軸・弱軸の座屈長さ（lk）としてそのまま、
+あるいは設計判断で係数を掛けて使ってください。
+</p>
+<h3>断面力の max/min</h3>
+<p>
+部材一覧の断面力は、荷重ケース（LC）ごとに、<b>部材を構成する全要素の全出力位置</b>
+（I 端・中間点 1/4・CNT・3/4・J 端）から N・Qy・Qz・Mt・My・Mz それぞれの最大値と最小値を
+拾ったものです。中間の分割節点の値も漏れなく包絡されます。
+</p>
+<div class="note">
+<b>符号について:</b> 統合部材の中にモデリング向き（I→J）が逆の要素が混ざっている場合、
+せん断や曲げの符号が要素間で反転して混ざります。max/min の<b>絶対値の包絡としては安全側に
+保存されます</b>が、符号の向きを厳密に使うときは「要素データ」シートで要素単位に確認してください。
+</div>
+
+<h2 id="sec8">8. 限界と注意点</h2>
+<table>
+<tr><th style="width:22em">事項</th><th>内容</th></tr>
+<tr><td>3本以上の同属性が集まる節点</td><td>統合しない（安全側）。通し材が実在する場合は、出力の「構成要素ID」を見て手動で長さを合算する</td></tr>
+<tr><td>曲線状の材（折れ線アーチ等）</td><td>折れ点ごとに切れる。アーチ弦材の座屈長さは別途設計判断が必要</td></tr>
+<tr><td>ピンや支点の設定漏れ</td><td>判定はモデルの入力（FRAME-RLS / CONSTRAINT）に従う。モデル側の設定が実情と違えば結果も違う</td></tr>
+<tr><td>横補剛材による座屈長さの低減</td><td>中間に取り付く小梁・母屋を横補剛とみなすかは設計判断のため、ツールは自動では切らない（=通し長さで安全側）。補剛点で切りたい場合はモデルで支点やピンを設定するか、Excel 上で長さを調整する</td></tr>
+<tr><td>座屈長さの強軸/弱軸の区別</td><td>出力は幾何的な通し長さ1本。lky / lkz の使い分けは設計者が行う</td></tr>
+</table>
+
+<footer>
+MGT2Excel 技術説明書 ／ 対象バージョン v1.0.0 ／ 詳細な使い方は同梱の README.md を参照
+</footer>
+
+</main>
+</body>
+</html>

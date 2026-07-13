@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MGT2Excel — midas iGen 断面算定データ変換</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏗️</text></svg>">
+<style>
+  :root {
+    --ink: #1a2433; --sub: #5a6b80; --line: #d8dfe8;
+    --blue: #2563c4; --blue-dark: #1d4fa0; --blue-bg: #eaf1fb;
+    --green: #2c7a4b; --green-bg: #eaf5ee; --red: #c2483d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #f2f5f8; color: var(--ink);
+    font-family: "Yu Gothic UI", "Meiryo", "Hiragino Kaku Gothic ProN", sans-serif;
+    line-height: 1.8;
+  }
+  header {
+    background: #fff; border-bottom: 1px solid var(--line);
+    padding: 14px 20px; display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 19px; margin: 0; }
+  header .ver { font-size: 12px; color: var(--sub); }
+  header nav { margin-left: auto; font-size: 14px; }
+  header nav a { color: var(--blue); text-decoration: none; margin-left: 16px; }
+  main { max-width: 760px; margin: 24px auto 80px; padding: 0 16px; }
+  .privacy {
+    background: var(--green-bg); border: 1px solid #bcdcc8; border-radius: 8px;
+    padding: 10px 16px; font-size: 13.5px; margin-bottom: 20px;
+  }
+  .card {
+    background: #fff; border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px 24px; margin-bottom: 18px;
+  }
+  .drop {
+    border: 2px dashed #b6c4d4; border-radius: 10px; padding: 26px 16px;
+    text-align: center; color: var(--sub); cursor: pointer; transition: 0.15s;
+    font-size: 14.5px;
+  }
+  .drop:hover, .drop.over { border-color: var(--blue); background: var(--blue-bg); }
+  .drop b { color: var(--blue); }
+  .files { margin-top: 14px; font-size: 14px; }
+  .files .frow {
+    display: flex; gap: 10px; padding: 6px 10px; border-radius: 6px; align-items: baseline;
+  }
+  .files .ftype { flex: 0 0 4.5em; font-weight: bold; color: var(--sub); }
+  .files .ok { color: var(--green); font-weight: bold; }
+  .files .miss { color: var(--red); }
+  fieldset {
+    border: 1px solid var(--line); border-radius: 8px; margin: 16px 0 0;
+    padding: 8px 16px 12px; font-size: 14.5px;
+  }
+  legend { font-size: 13px; color: var(--sub); padding: 0 6px; }
+  fieldset label { display: block; cursor: pointer; }
+  .runrow { text-align: center; margin-top: 18px; }
+  button#run {
+    background: var(--blue); color: #fff; border: 0; border-radius: 8px;
+    font-size: 16px; padding: 12px 48px; cursor: pointer; font-family: inherit;
+  }
+  button#run:hover { background: var(--blue-dark); }
+  button#run:disabled { background: #a8b6c6; cursor: default; }
+  #status { font-size: 13px; color: var(--sub); margin-top: 8px; min-height: 1.4em; }
+  #logwrap { display: none; }
+  #log {
+    background: #10161f; color: #cfe0f2; border-radius: 8px; padding: 14px 16px;
+    font-family: Consolas, "MS Gothic", monospace; font-size: 12.5px;
+    white-space: pre-wrap; word-break: break-all; max-height: 320px; overflow-y: auto;
+    line-height: 1.6;
+  }
+  #dl {
+    display: none; margin-top: 14px; text-align: center;
+  }
+  #dl a {
+    display: inline-block; background: var(--green); color: #fff; text-decoration: none;
+    border-radius: 8px; padding: 12px 36px; font-size: 15px;
+  }
+  .hint { font-size: 13px; color: var(--sub); }
+  footer { text-align: center; font-size: 12px; color: var(--sub); margin-top: 40px; }
+  footer a { color: var(--blue); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MGT2Excel</h1>
+  <span class="ver">midas iGen MGT/ANL → 断面算定用 Excel</span>
+  <nav>
+    <a href="manual.html">使い方</a>
+    <a href="logic.html">部材統合の判定ロジック</a>
+  </nav>
+</header>
+
+<main>
+  <div class="privacy">
+    🔒 ファイルはすべて<b>お使いの PC のブラウザ内だけで処理</b>されます。
+    モデルデータがサーバーへ送信されることはありません。
+  </div>
+
+  <div class="card">
+    <div class="drop" id="drop">
+      ここに <b>.mgt</b> と <b>.anl</b> をまとめてドラッグ＆ドロップ<br>
+      （クリックしてファイル選択でも OK）
+      <input type="file" id="file" multiple accept=".mgt,.anl" hidden>
+    </div>
+    <div class="files">
+      <div class="frow"><span class="ftype">MGT</span><span id="fmgt" class="miss">未選択 — モデルファイル（必須）</span></div>
+      <div class="frow"><span class="ftype">ANL</span><span id="fanl" class="miss">未選択 — 解析結果テキスト（必須）</span></div>
+    </div>
+
+    <fieldset>
+      <legend>部材統合オプション</legend>
+      <label><input type="checkbox" id="optSup" checked> 支点の節点で部材を切る</label>
+      <label><input type="checkbox" id="optRls" checked> ピン（梁端解放）の節点で部材を切る</label>
+      <label><input type="checkbox" id="optCnv" checked> 断面力・長さを kN・kN·m・mm に換算する</label>
+    </fieldset>
+
+    <div class="runrow">
+      <button id="run" disabled>変換実行</button>
+      <div id="status">変換エンジンを準備しています…（初回のみ 10〜30 秒）</div>
+    </div>
+
+    <div id="dl"><a id="dlink" download>📥 Excel をダウンロード</a></div>
+  </div>
+
+  <div class="card" id="logwrap">
+    <b style="font-size:14px">処理ログ</b>
+    <div id="log"></div>
+  </div>
+
+  <p class="hint">
+    ※ ANL は iGen の「解析結果のテキスト出力」で作成してください（梁要素の断面力は必須、
+    ブレースがある場合はトラス要素の断面力も含める）。大きなモデル（数万要素）では
+    変換に数分かかることがあります。タブは閉じずにお待ちください。
+  </p>
+
+  <footer>
+    MGT2Excel — 変換はブラウザ内 Python（<a href="https://pyodide.org" target="_blank" rel="noopener">Pyodide</a>）で実行されます ／
+    <a href="https://github.com/rebuildon0/mgt2excel" target="_blank" rel="noopener">ソースコード</a>
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let mgtFile = null, anlFile = null, engineReady = false, running = false;
+
+const worker = new Worker("worker.js");
+worker.onerror = (e) => {
+  running = false;
+  appendLog("エンジンエラー: " + (e.message || "worker の起動に失敗しました"));
+  $("status").textContent =
+    "変換エンジンの読み込みに失敗しました。ページを再読み込みしてください（ネットワーク接続が必要です）。";
+};
+worker.onmessage = (e) => {
+  const m = e.data;
+  if (m.type === "ready") {
+    engineReady = true;
+    $("status").textContent = "準備完了。ファイルを選んで「変換実行」を押してください。";
+    refresh();
+  } else if (m.type === "log") {
+    appendLog(m.text);
+  } else if (m.type === "done") {
+    running = false;
+    const blob = new Blob([m.bytes], {type:
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    const url = URL.createObjectURL(blob);
+    const a = $("dlink");
+    a.href = url;
+    a.download = m.filename;
+    $("dl").style.display = "block";
+    $("status").textContent = "変換が完了しました。";
+    appendLog("---- 完了 ----");
+    a.click();  // 自動ダウンロード
+    refresh();
+  } else if (m.type === "error") {
+    running = false;
+    appendLog("エラー: " + m.text);
+    $("status").textContent = "エラーが発生しました。ログを確認してください。";
+    refresh();
+  }
+};
+worker.postMessage({type: "init"});
+
+function appendLog(s) {
+  $("logwrap").style.display = "block";
+  const el = $("log");
+  el.textContent += s + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+
+function setFiles(list) {
+  for (const f of list) {
+    const n = f.name.toLowerCase();
+    if (n.endsWith(".mgt")) mgtFile = f;
+    else if (n.endsWith(".anl")) anlFile = f;
+  }
+  $("fmgt").className = mgtFile ? "ok" : "miss";
+  $("fmgt").textContent = mgtFile ? "✔ " + mgtFile.name : "未選択 — モデルファイル（必須）";
+  $("fanl").className = anlFile ? "ok" : "miss";
+  $("fanl").textContent = anlFile ? "✔ " + anlFile.name : "未選択 — 解析結果テキスト（必須）";
+  refresh();
+}
+
+function refresh() {
+  $("run").disabled = !(engineReady && mgtFile && anlFile && !running);
+}
+
+const drop = $("drop");
+drop.addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", (e) => setFiles(e.target.files));
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+drop.addEventListener("drop", (e) => {
+  e.preventDefault(); drop.classList.remove("over");
+  setFiles(e.dataTransfer.files);
+});
+
+$("run").addEventListener("click", async () => {
+  if (running) return;
+  running = true;
+  refresh();
+  $("dl").style.display = "none";
+  $("log").textContent = "";
+  $("status").textContent = "変換中…（大きなモデルでは数分かかります）";
+  const [mgtBuf, anlBuf] = await Promise.all([mgtFile.arrayBuffer(), anlFile.arrayBuffer()]);
+  const outName = mgtFile.name.replace(/\.mgt$/i, "") + "_断面算定データ.xlsx";
+  worker.postMessage({
+    type: "convert",
+    mgt: mgtBuf, anl: anlBuf, filename: outName,
+    supports: $("optSup").checked,
+    releases: $("optRls").checked,
+    units: $("optCnv").checked,
+  }, [mgtBuf, anlBuf]);
+});
+</script>
+</body>
+</html>

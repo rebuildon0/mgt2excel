@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使い方 — MGT2Excel</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏗️</text></svg>">
+<style>
+  :root {
+    --ink: #1a2433; --sub: #5a6b80; --line: #d8dfe8;
+    --blue: #2563c4; --blue-bg: #eaf1fb;
+    --green: #2c7a4b; --green-bg: #eaf5ee;
+    --amber-bg: #fdf6e3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 16px 80px;
+    font-family: "Yu Gothic UI", "Meiryo", "Hiragino Kaku Gothic ProN", sans-serif;
+    color: var(--ink); background: #fafbfc; line-height: 1.9;
+  }
+  main { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 26px; border-bottom: 3px solid var(--blue); padding: 24px 0 10px; }
+  h1 small { display: block; font-size: 13px; color: var(--sub); font-weight: normal; margin-top: 6px; }
+  h2 {
+    font-size: 20px; margin-top: 52px; padding: 6px 12px;
+    background: var(--blue-bg); border-left: 5px solid var(--blue); border-radius: 3px;
+  }
+  p { margin: 12px 0; }
+  nav.top { font-size: 14px; margin-top: 14px; }
+  nav.top a { color: var(--blue); text-decoration: none; margin-right: 18px; }
+  .step {
+    background: #fff; border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 22px; margin: 18px 0;
+  }
+  .step h3 { margin: 0 0 8px; font-size: 17px; }
+  .step h3 .num {
+    display: inline-block; background: var(--blue); color: #fff; border-radius: 50%;
+    width: 30px; height: 30px; text-align: center; line-height: 30px;
+    margin-right: 10px; font-size: 16px;
+  }
+  .step img {
+    max-width: 100%; border: 1px solid var(--line); border-radius: 8px;
+    margin-top: 10px; box-shadow: 0 2px 8px rgba(20,40,70,0.08);
+  }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: #f0f4f9; }
+  .note { background: var(--amber-bg); border-left: 5px solid #d9a520; border-radius: 3px; padding: 10px 14px; margin: 16px 0; font-size: 14px; }
+  .good { background: var(--green-bg); border-left: 5px solid var(--green); border-radius: 3px; padding: 10px 14px; margin: 16px 0; font-size: 14px; }
+  details { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 10px 18px; margin: 10px 0; }
+  summary { cursor: pointer; font-weight: bold; font-size: 14.5px; }
+  details p { font-size: 14px; }
+  code { background: #eef1f5; border-radius: 4px; padding: 1px 6px; font-family: Consolas, monospace; font-size: 0.92em; }
+  footer { margin-top: 64px; font-size: 12px; color: var(--sub); border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>MGT2Excel の使い方
+<small>midas iGen の解析結果から、断面算定に使いやすい Excel を3クリックで作るツール</small>
+</h1>
+
+<nav class="top">
+  <a href="index.html">← ツールを開く</a>
+  <a href="logic.html">部材統合の判定ロジック（詳細）</a>
+</nav>
+
+<div class="good">
+🔒 <b>データについて:</b> このツールはブラウザの中だけで動きます。
+モデルファイルがインターネット上のサーバーに送信されることは一切ありません
+（ページを開くとき以外は通信しません）。
+</div>
+
+<h2>これは何をするツール？</h2>
+<p>
+midas iGen の <b>MGT ファイル（モデル）</b>と <b>ANL ファイル（解析結果テキスト）</b>を読み取り、
+断面算定に使いやすい Excel を作ります。ポイントは、モデル上で細かく分割された直線要素を
+<b>「実際の1本の部材」に自動でまとめ、通し長さ＝座屈長さ</b>として整理してくれること。
+断面力（N・Q・M）も荷重ケースごとに部材単位の max/min に集計されます。
+</p>
+
+<h2>準備するもの（iGen 側の操作）</h2>
+<table>
+<tr><th style="width:8em">ファイル</th><th>作り方</th></tr>
+<tr><td><b>.mgt</b></td><td>iGen のメニューから <b>ファイル → エクスポート → midas iGen MGT ファイル</b> で保存</td></tr>
+<tr><td><b>.anl</b></td><td><b>解析結果のテキスト出力</b>で保存。出力項目に必ず以下を含めること:<br>
+・<b>梁要素の断面力</b>（必須。中間点出力を有効にすると中央曲げも拾える）<br>
+・<b>トラス要素の断面力</b>（ブレースなどトラス要素がある場合）<br>
+・出力したい<b>荷重ケース／荷重組合わせ</b>を選択しておく</td></tr>
+</table>
+
+<h2>使い方 — 3ステップ</h2>
+
+<div class="step">
+<h3><span class="num">1</span>ページを開く</h3>
+<p>ツールのページを開くと、変換エンジンの準備が自動で始まります（初回のみ 10〜30 秒。
+「準備完了」と表示されたら OK）。</p>
+<img src="img/step1_ready.png" alt="起動直後の画面。準備完了の表示を待つ">
+</div>
+
+<div class="step">
+<h3><span class="num">2</span>MGT と ANL をドラッグ＆ドロップ</h3>
+<p>点線の枠に 2 つのファイルを<b>まとめて</b>ドラッグ＆ドロップします（枠をクリックして
+選択してもOK）。ファイル名の横に ✔ が付けば読み込み準備完了です。</p>
+<img src="img/step2_files.png" alt="ファイルを投入した状態。MGT と ANL に✔が付く">
+</div>
+
+<div class="step">
+<h3><span class="num">3</span>「変換実行」を押す → Excel が自動ダウンロード</h3>
+<p>処理ログが流れ、完了すると Excel（.xlsx）が自動でダウンロードされます。
+体育館規模のモデルで数十秒、数万要素の大きなモデルでは数分かかります。
+<b>タブは閉じずに</b>お待ちください。</p>
+<img src="img/step3_done.png" alt="変換完了画面。ログとダウンロードボタンが表示される">
+</div>
+
+<h2>できあがる Excel（4シート）</h2>
+<table>
+<tr><th style="width:9em">シート</th><th>内容</th></tr>
+<tr><td><b>部材一覧</b></td><td>断面算定のメインデータ。統合された部材ごとに<b>1部材×1荷重ケース＝1行</b>。
+断面・材料・両端の節点と座標・<b>部材長さ（＝座屈長さ）</b>・<b>構成要素ID</b>（どの要素を合体させたか）・
+N/Qy/Qz/Mt/My/Mz の max/min</td></tr>
+<tr><td>要素データ</td><td>統合前の全要素×荷重ケース×出力位置（I・中間点・J）の断面力。部材IDで部材一覧と紐付く</td></tr>
+<tr><td>断面リスト</td><td>モデルに定義された断面の寸法一覧</td></tr>
+<tr><td>節点座標</td><td>全節点の XYZ 座標</td></tr>
+</table>
+<p>単位は <b>kN・kN·m・mm</b> に換算済み（オプションで元単位のままにもできます）。
+Rigid・ダミー材は「ダミー」列でフィルタして除外できます。</p>
+
+<h2>オプションの意味</h2>
+<table>
+<tr><th style="width:20em">オプション</th><th>説明</th></tr>
+<tr><td>支点の節点で部材を切る</td><td>支点（拘束点）の上をまたいで部材を1本にしない。座屈長さを支点間で取る（通常は ON のまま）</td></tr>
+<tr><td>ピン（梁端解放）の節点で部材を切る</td><td>梁端解放が設定された継手位置で部材を切る（通常は ON のまま）</td></tr>
+<tr><td>断面力・長さを kN・kN·m・mm に換算する</td><td>OFF にするとモデルの元単位（tonf 等）のまま出力</td></tr>
+</table>
+<p>どういう条件で「1本の部材」と判定されるかの詳細は
+<a href="logic.html">部材統合の判定ロジック</a> を参照してください。</p>
+
+<h2>よくある質問</h2>
+
+<details>
+<summary>ブレース（トラス材）の断面力が空欄になる</summary>
+<p>ANL にトラス要素の断面力が含まれていません。iGen のテキスト出力で
+「トラス要素の断面力」を含めて ANL を作り直してください。
+（処理ログに「断面力が無い要素が◯本あります」と表示されます）</p>
+</details>
+
+<details>
+<summary>「準備完了」にならない／エラーが出る</summary>
+<p>変換エンジンのダウンロードにはインターネット接続が必要です（初回のみ約10MB、
+2回目以降はキャッシュされます）。ページを再読み込みして再試行してください。</p>
+</details>
+
+<details>
+<summary>処理ログに「警告」が出た</summary>
+<p>警告は「読めなかった・含まれていなかったデータ」を知らせるものです。内容を確認し、
+必要なら iGen 側の出力設定を見直して ANL を作り直してください。警告が出ても
+変換自体は続行され、読めた範囲で Excel が作られます。</p>
+</details>
+
+<details>
+<summary>断面力の値が粗い気がする</summary>
+<p>ANL の断面力は小数1桁で出力されるため、元単位が tonf の場合の分解能は約 ±0.5 kN です。
+細かい精度が必要な場合は、iGen の単位系を kN にしてから ANL を出力してください。</p>
+</details>
+
+<details>
+<summary>会社のデータを外に出して大丈夫？</summary>
+<p>大丈夫です。ファイルの読み取り・変換・Excel 生成はすべて<b>お使いの PC のブラウザ内</b>で
+実行され、モデルデータは外部に送信されません。ソースコードも
+<a href="https://github.com/rebuildon0/mgt2excel" target="_blank" rel="noopener">GitHub で公開</a>されており、
+処理内容を誰でも確認できます。</p>
+</details>
+
+<details>
+<summary>Python で直接実行したい（上級者向け）</summary>
+<p>変換エンジンの実体は Python スクリプト <code>mgt2excel.py</code> です。
+リポジトリから取得して <code>py -3 mgt2excel.py model.mgt -o out.xlsx</code> のように
+CLI でも実行できます（要 openpyxl）。数万要素の大きなモデルはローカル実行のほうが高速です。</p>
+</details>
+
+<footer>
+MGT2Excel ／ <a href="index.html">ツールを開く</a> ／
+<a href="logic.html">部材統合の判定ロジック</a> ／
+<a href="https://github.com/rebuildon0/mgt2excel">GitHub</a>
+</footer>
+
+</main>
+</body>
+</html>
