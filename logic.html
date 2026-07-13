@@ -178,9 +178,12 @@ I 端で到達する要素は向きを反転して比較します（これによ
 </div>
 
 <div class="cond">
-<b class="tag">条件 3</b><b>同属性の要素がその節点にちょうど2本であること</b>
-<p>同じ属性の要素が節点に3本以上集まっている場合、どれとどれが「1本」なのか
-幾何だけでは決められない（X形の交差など）ため、<b>安全側としてその節点では統合しません</b>。</p>
+<b class="tag">条件 3</b><b>直線の続きが一意に決まること</b>
+<p>同じ属性の要素が節点に3本以上集まっていても、「同一直線上の続き」のペアが
+一意に決まれば統合します。たとえば<b>X形の交差（4本）</b>では、直線どうしのペアは
+幾何的に一意に決まるため、<b>各直線ごとに1本の部材</b>として統合されます。</p>
+<p>一方、同一直線上の続きの候補が2本以上ある場合（同じ向きに要素が重なって
+モデリングされている等）は、どれが「1本」か決められないため統合しません。</p>
 </div>
 
 <div class="cond">
@@ -209,7 +212,8 @@ GUI のオプションで OFF にもできます。</p>
 <tr class="box-ng"><td>中間節点側の端部に<b>ピン（梁端解放）</b></td><td class="ng">切る</td><td>条件5。継手位置＝1本の終わり</td></tr>
 <tr class="box-ng"><td><b>断面や材料が変わる</b>（H-300 → H-250）</td><td class="ng">切る</td><td>条件1。継手とみなす</td></tr>
 <tr class="box-ng"><td>山形の<b>頂点で折れる</b>（登り梁どうし）</td><td class="ng">切る</td><td>条件2。直線でない</td></tr>
-<tr class="box-ng"><td>同断面ブレースが<b>X形に交差</b>する節点</td><td class="ng">切る</td><td>条件3。同属性が4本集まり、ペアが曖昧</td></tr>
+<tr class="box-ok"><td>同断面ブレースが<b>X形に交差</b>する節点</td><td class="ok">統合する</td><td>条件3。直線ペアが一意に決まるため、各直線ごとに1部材（計2部材）になる</td></tr>
+<tr class="box-ng"><td>同一直線上に<b>続きの要素が2本重なる</b>（重複モデリング等）</td><td class="ng">切る</td><td>条件3。どれが「1本」か曖昧なため統合しない</td></tr>
 </table>
 <figure>
 <svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-family="Meiryo,sans-serif">
@@ -238,13 +242,13 @@ GUI のオプションで OFF にもできます。</p>
     <circle cx="192" cy="210" r="8" fill="#fff" stroke="#c2483d" stroke-width="2.5"/>
     <text x="192" y="245" font-size="12" fill="#c2483d" text-anchor="middle">梁端解放（FRAME-RLS）</text>
   </g>
-  <!-- NG: X brace -->
+  <!-- OK: X brace -->
   <g>
-    <text x="420" y="170" font-size="13" fill="#c2483d" font-weight="bold">× 切る: 同断面がX形に交差（4本）</text>
-    <line x1="450" y1="180" x2="710" y2="260" stroke="#8899aa" stroke-width="4"/>
+    <text x="420" y="170" font-size="13" fill="#2c7a4b" font-weight="bold">✓ 統合する: 同断面がX形に交差（4本）</text>
+    <line x1="450" y1="180" x2="710" y2="260" stroke="#2c7a4b" stroke-width="4"/>
     <line x1="450" y1="260" x2="710" y2="180" stroke="#8899aa" stroke-width="4"/>
-    <circle cx="580" cy="220" r="6" fill="#fff" stroke="#c2483d" stroke-width="2.5"/>
-    <text x="580" y="292" font-size="12" fill="#5a6b80" text-anchor="middle">どのペアが「1本」か曖昧 → 統合しない</text>
+    <circle cx="580" cy="220" r="6" fill="#fff" stroke="#2c7a4b" stroke-width="2.5"/>
+    <text x="580" y="292" font-size="12" fill="#5a6b80" text-anchor="middle">直線ペアは一意に決まる → 各直線ごとに1部材（計2部材）</text>
   </g>
 </svg>
 <figcaption>図3: 代表的な判定例</figcaption>
@@ -289,7 +293,8 @@ GUI のオプションで OFF にもできます。</p>
 <h2 id="sec8">8. 限界と注意点</h2>
 <table>
 <tr><th style="width:22em">事項</th><th>内容</th></tr>
-<tr><td>3本以上の同属性が集まる節点</td><td>統合しない（安全側）。通し材が実在する場合は、出力の「構成要素ID」を見て手動で長さを合算する</td></tr>
+<tr><td>直線の続きが曖昧な節点（同一線上に要素が重複している等）</td><td>統合しない（安全側）。通し材が実在する場合は、出力の「構成要素ID」を見て手動で長さを合算する</td></tr>
+<tr><td>X交差ブレースの座屈長さ</td><td>交差点で押さえられているとみなして交差点間で座屈長さを取りたい場合は、出力の通し長さを設計者が読み替える（ツールは通し長さで出力する）</td></tr>
 <tr><td>曲線状の材（折れ線アーチ等）</td><td>折れ点ごとに切れる。アーチ弦材の座屈長さは別途設計判断が必要</td></tr>
 <tr><td>ピンや支点の設定漏れ</td><td>判定はモデルの入力（FRAME-RLS / CONSTRAINT）に従う。モデル側の設定が実情と違えば結果も違う</td></tr>
 <tr><td>横補剛材による座屈長さの低減</td><td>中間に取り付く小梁・母屋を横補剛とみなすかは設計判断のため、ツールは自動では切らない（=通し長さで安全側）。補剛点で切りたい場合はモデルで支点やピンを設定するか、Excel 上で長さを調整する</td></tr>

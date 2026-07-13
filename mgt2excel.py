@@ -46,6 +46,16 @@ def _print(msg):
         print(str(msg).encode(enc, "replace").decode(enc))
 
 
+def _prog(progress, pct, label=""):
+    """進捗コールバック(0-100)。未指定・例外時は何もしない"""
+    if progress is None:
+        return
+    try:
+        progress(pct, label)
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------- MGT parse
 def _read_lines(path):
     with open(path, encoding="cp932", errors="replace") as f:
@@ -194,7 +204,7 @@ def _pt_order(pt):
     return int(m.group(1)) / int(m.group(2)) if m else 1.5
 
 
-def parse_anl(path, log=_print):
+def parse_anl(path, log=_print, progress=None):
     anl = _read_lines(path)
 
     def find(pat, start=0):
@@ -213,7 +223,11 @@ def parse_anl(path, log=_print):
         b1 = find("梁要素の断面力 ---", b0)
         cur_eid = cur_lc = None
         n_unmatched = 0
-        for ln in anl[b0:b1 if b1 > 0 else len(anl)]:
+        block = anl[b0:b1 if b1 > 0 else len(anl)]
+        n_block = max(1, len(block))
+        for li, ln in enumerate(block):
+            if li % 20000 == 0:
+                _prog(progress, 5 + 30.0 * li / n_block, "ANL の断面力を読込中")
             m = _RE_BELEM.match(ln)
             if m:
                 cur_eid, cur_lc = int(m.group(1)), m.group(4)
@@ -306,19 +320,35 @@ def merge_members(model, split_at_supports=True, split_at_releases=True, log=_pr
             e = elements[eid]
             bykey[(e["type"], e["mat"], e["sec"], e["beta"])].append((eid, end))
         for grp in bykey.values():
-            if len(grp) != 2:
-                continue  # 同断面が3本以上集まる節点は統合しない(曖昧)
-            (e1, end1), (e2, end2) = grp
-            if e1 == e2:
+            if len(grp) < 2:
                 continue
-            if split_at_releases and (released(e1, end1) or released(e2, end2)):
-                continue  # ピン等 -> 部材境界
-            v1, v2 = elements[e1]["vec"], elements[e2]["vec"]
-            # 節点を通過する向きに揃える: J側(end=1)はそのまま、I側(end=0)は反転
-            d1 = v1 if end1 == 1 else tuple(-c for c in v1)
-            d2 = v2 if end2 == 0 else tuple(-c for c in v2)
-            if sum(a * b for a, b in zip(d1, d2)) > COS_TOL:
-                ra, rb = find(e1), find(e2)
+            # 節点から離れる向きの単位ベクトル。2要素が同一直線上で連続している
+            # <=> 離れる向きが正反対 (内積 < -COS_TOL)。
+            # X形交差(4本)でも直線ペアは一意に決まるので統合できる。
+            leave = {}
+            for eid, end in grp:
+                v = elements[eid]["vec"]
+                leave[(eid, end)] = v if end == 0 else tuple(-c for c in v)
+            partners = {k: [] for k in grp}
+            for i in range(len(grp)):
+                for j in range(i + 1, len(grp)):
+                    a, b = grp[i], grp[j]
+                    if a[0] == b[0]:
+                        continue  # 同一要素の両端(ループ状)は対象外
+                    dot = sum(x * y for x, y in zip(leave[a], leave[b]))
+                    if dot < -COS_TOL:
+                        partners[a].append(b)
+                        partners[b].append(a)
+            for a, cands in partners.items():
+                # 直線の続きが一意に決まる場合のみ統合(重なり等で曖昧なら統合しない)
+                if len(cands) != 1:
+                    continue
+                b = cands[0]
+                if partners[b] != [a]:
+                    continue
+                if split_at_releases and (released(*a) or released(*b)):
+                    continue  # ピン等 -> 部材境界
+                ra, rb = find(a[0]), find(b[0])
                 if ra != rb:
                     parent[rb] = ra
 
@@ -344,7 +374,8 @@ def _dummy_tag(e, model):
     return "、".join(tags)
 
 
-def build_members(model, results, groups, convert_units=True, log=_print):
+def build_members(model, results, groups, convert_units=True, log=_print,
+                  progress=None):
     nodes, elements = model["nodes"], model["elements"]
     beam_forces, truss_forces = results["beam_forces"], results["truss_forces"]
     lcs = results["lcs"]
@@ -373,7 +404,10 @@ def build_members(model, results, groups, convert_units=True, log=_print):
 
     rows = []
     elem_to_member = {}
+    n_groups = max(1, len(groups))
     for idx, eids in enumerate(groups, 1):
+        if idx % 1000 == 0:
+            _prog(progress, 40 + 15.0 * idx / n_groups, "部材データを集計中")
         mid = "M{:04d}".format(idx)
         for eid in eids:
             elem_to_member[eid] = mid
@@ -418,7 +452,8 @@ def build_members(model, results, groups, convert_units=True, log=_print):
 
 
 # ---------------------------------------------------------------- Excel
-def write_excel(out_path, model, results, rows, elem_to_member, units, log=_print):
+def write_excel(out_path, model, results, rows, elem_to_member, units,
+                log=_print, progress=None):
     import openpyxl
     from openpyxl.styles import Alignment, Font, PatternFill
 
@@ -447,7 +482,10 @@ def write_excel(out_path, model, results, rows, elem_to_member, units, log=_prin
         u = uf if c in ("N", "Qy", "Qz") else um
         head += ["{}_max({})".format(c, u), "{}_min({})".format(c, u)]
     ws.append(head)
-    for r in rows:
+    n_rows = max(1, len(rows))
+    for ri, r in enumerate(rows):
+        if ri % 1000 == 0:
+            _prog(progress, 55 + 15.0 * ri / n_rows, "Excel: 部材一覧を作成中")
         base = [r["mid"], r["type"], r["sec_id"], r["sec"], r["mat"],
                 r["n_elem"], r["eids"], r["na"], r["nb"],
                 round(r["pa"][0], 1), round(r["pa"][1], 1), round(r["pa"][2], 1),
@@ -469,7 +507,10 @@ def write_excel(out_path, model, results, rows, elem_to_member, units, log=_prin
                "N({})".format(uf), "Qy({})".format(uf), "Qz({})".format(uf),
                "Mt({})".format(um), "My({})".format(um), "Mz({})".format(um)])
     f_force, f_mom, f_len = units["f_force"], units["f_mom"], units["f_len"]
-    for eid in sorted(model["elements"]):
+    n_elems = max(1, len(model["elements"]))
+    for ei, eid in enumerate(sorted(model["elements"])):
+        if ei % 1000 == 0:
+            _prog(progress, 70 + 25.0 * ei / n_elems, "Excel: 要素データを作成中")
         e = model["elements"][eid]
         base = [eid, elem_to_member.get(eid, ""), e["type"],
                 model["sections"].get(e["sec"], {}).get("name", ""),
@@ -513,6 +554,7 @@ def write_excel(out_path, model, results, rows, elem_to_member, units, log=_prin
     style_header(ws)
 
     # 保存。ロックされていたらタイムスタンプ付きの別名で保存する
+    _prog(progress, 96, "Excel ファイルを保存中")
     try:
         wb.save(out_path)
     except PermissionError:
@@ -528,11 +570,13 @@ def write_excel(out_path, model, results, rows, elem_to_member, units, log=_prin
 # ---------------------------------------------------------------- 変換本体
 def convert(mgt_path, anl_path, out_path=None,
             split_at_supports=True, split_at_releases=True,
-            convert_units=True, log=_print):
+            convert_units=True, log=_print, progress=None):
     if out_path is None:
         out_path = os.path.splitext(mgt_path)[0] + "_断面算定データ.xlsx"
+    _prog(progress, 1, "MGT を読込中")
     model = parse_mgt(mgt_path, log)
-    results = parse_anl(anl_path, log)
+    _prog(progress, 5, "ANL を読込中")
+    results = parse_anl(anl_path, log, progress)
 
     n_no_force = sum(1 for e in model["elements"].values()
                      if e["id"] not in results["beam_forces"]
@@ -540,10 +584,15 @@ def convert(mgt_path, anl_path, out_path=None,
     if n_no_force:
         log("警告: ANL に断面力が無い要素が {} 本あります(断面力欄は空になります)".format(n_no_force))
 
+    _prog(progress, 37, "部材を統合中")
     groups = merge_members(model, split_at_supports, split_at_releases, log)
+    _prog(progress, 40, "部材データを集計中")
     rows, elem_to_member, units = build_members(model, results, groups,
-                                                convert_units, log)
-    return write_excel(out_path, model, results, rows, elem_to_member, units, log)
+                                                convert_units, log, progress)
+    out = write_excel(out_path, model, results, rows, elem_to_member, units,
+                      log, progress)
+    _prog(progress, 100, "完了")
+    return out
 
 
 # ---------------------------------------------------------------- GUI

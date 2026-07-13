@@ -24,6 +24,8 @@ function convert(msg) {
   pyodide.FS.writeFile("/tmp/model.mgt", new Uint8Array(msg.mgt));
   pyodide.FS.writeFile("/tmp/model.anl", new Uint8Array(msg.anl));
   pyodide.globals.set("js_log", (s) => postMessage({ type: "log", text: String(s) }));
+  pyodide.globals.set("js_progress",
+    (pct, label) => postMessage({ type: "progress", pct: Number(pct), label: String(label) }));
   pyodide.globals.set("opt_supports", msg.supports);
   pyodide.globals.set("opt_releases", msg.releases);
   pyodide.globals.set("opt_units", msg.units);
@@ -36,6 +38,7 @@ mgt2excel.convert(
     split_at_releases=bool(opt_releases),
     convert_units=bool(opt_units),
     log=js_log,
+    progress=js_progress,
 )
 `);
     const bytes = pyodide.FS.readFile("/tmp/out.xlsx");

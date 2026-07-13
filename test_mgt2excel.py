@@ -105,9 +105,25 @@ class TestMergeOrientation(unittest.TestCase):
         self.assertEqual(
             len(merge_members(model, split_at_releases=False, log=_quiet)), 1)
 
-    def test_three_at_node_not_merged(self):
+    def test_three_at_node_collinear_pair_merged(self):
+        """3本集まっても、直線ペアが一意なら統合される(非直線の1本は単独)"""
         model = _make_model([(1, 10, 11, P0, P1), (2, 11, 12, P1, P2),
                              (3, 11, 13, P1, PY)])
+        self.assertEqual(len(merge_members(model, log=_quiet)), 2)
+
+    def test_x_crossing_merged_per_line(self):
+        """X形交差(同断面4本)は直線ごとに1部材、計2部材に統合される"""
+        C = (1000, 1000, 0)
+        model = _make_model([
+            (1, 10, 99, (0, 0, 0), C), (2, 99, 12, C, (2000, 2000, 0)),
+            (3, 13, 99, (0, 2000, 0), C), (4, 99, 14, C, (2000, 0, 0)),
+        ])
+        self.assertEqual(len(merge_members(model, log=_quiet)), 2)
+
+    def test_ambiguous_overlap_not_merged(self):
+        """同一直線上の続きが2本あって曖昧な場合は統合しない"""
+        model = _make_model([(1, 10, 11, P0, P1), (2, 11, 12, P1, P2),
+                             (3, 11, 14, P1, P2)])
         self.assertEqual(len(merge_members(model, log=_quiet)), 3)
 
 
